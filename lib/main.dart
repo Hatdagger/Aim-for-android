@@ -24,6 +24,7 @@ Future<void> main() async {
   final updates = UpdateChecker(settings)..start();
   final osk = OskController();
   final numpad = NumpadT9(settings, osk);
+  WidgetsBinding.instance.addObserver(OskBackObserver(osk)); // Back closes the phone first
   HardwareKeyboard.instance.addHandler(numpad.handle);
   HardwareKeyboard.instance.addHandler(input.handleKey);
   runApp(

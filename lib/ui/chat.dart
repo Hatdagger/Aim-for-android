@@ -139,9 +139,16 @@ class _ChatPaneState extends State<ChatPane> {
         const SizedBox(width: 4),
       ],
       padding: const EdgeInsets.all(4),
-      child: Column(
+      // Short windows (phones and handhelds held sideways) get a slim layout:
+      // AIM buttons as small icons in the header, Send beside the message box.
+      child: LayoutBuilder(builder: (ctx, box) {
+        final compact = box.maxHeight < 520;
+        return Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
+          if (compact)
+            _compactHeader(app, conv.displayName, key, online, warnPct > 0 ? '$status · Warning $warnPct%' : status)
+          else
           RetroListTile(
             onTap: () => Navigator.of(context)
                 .push(MaterialPageRoute(builder: (_) => ProfileScreen(screenName: widget.screenName))),
@@ -193,27 +200,94 @@ class _ChatPaneState extends State<ChatPane> {
             ),
           ),
           const SizedBox(height: 4),
-          RetroTextField(
-            controller: _input,
-            hint: 'Message ${conv.displayName}',
-            minLines: 1,
-            maxLines: 4,
-            enterSubmits: true,
-            action: TextInputAction.send,
-            doneLabel: 'Send',
-            oskPreview: () => [
-              for (final l in _app.conversationFor(widget.screenName).lines.reversed.take(5).toList().reversed)
-                OskLine(l.mine ? 'me' : l.from, l.text, l.mine),
-            ],
-            oskPreviewListen: _app,
-            onChanged: _onChanged,
-            onSubmitted: (_) => _send(),
-          ),
-          const SizedBox(height: 4),
-          _actionBar(app, conv.displayName),
+          if (compact)
+            Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
+              Expanded(child: _inputField(conv.displayName, maxLines: 2)),
+              const SizedBox(width: 4),
+              RetroButton(
+                minWidth: 64,
+                minHeight: 40,
+                isDefault: true,
+                onPressed: _send,
+                child: const Text('Send', style: TextStyle(fontWeight: FontWeight.bold)),
+              ),
+            ])
+          else ...[
+            _inputField(conv.displayName),
+            const SizedBox(height: 4),
+            _actionBar(app, conv.displayName),
+          ],
         ],
-      ),
+      );
+      }),
     );
+  }
+
+  Widget _inputField(String name, {int maxLines = 4}) => RetroTextField(
+        controller: _input,
+        hint: 'Message $name',
+        minLines: 1,
+        maxLines: maxLines,
+        enterSubmits: true,
+        action: TextInputAction.send,
+        doneLabel: 'Send',
+        oskPreview: () => [
+          for (final l in _app.conversationFor(widget.screenName).lines.reversed.take(5).toList().reversed)
+            OskLine(l.mine ? 'me' : l.from, l.text, l.mine),
+        ],
+        oskPreviewListen: _app,
+        onChanged: _onChanged,
+        onSubmitted: (_) => _send(),
+      );
+
+  /// One-line buddy header with AIM's Warn/Block/Add/Talk/Info as small icons.
+  Widget _compactHeader(AppState app, String name, String key, bool online, String status) {
+    final signedOn = app.link == LinkState.online;
+    final blocked = app.isBlocked(widget.screenName);
+    final buddy = app.isBuddy(widget.screenName);
+    Widget icon(IconData i, String tip, VoidCallback? onPressed) => Tooltip(
+          message: tip,
+          child: Padding(
+            padding: const EdgeInsets.only(left: 2),
+            child: RetroButton(
+              minWidth: 34,
+              minHeight: 32,
+              padding: const EdgeInsets.all(3),
+              semanticLabel: tip,
+              onPressed: onPressed,
+              child: Icon(i, size: 18, color: onPressed == null ? Retro.shadow : Colors.black),
+            ),
+          ),
+        );
+    return Row(children: [
+      Expanded(
+        child: RetroListTile(
+          onTap: () => Navigator.of(context)
+              .push(MaterialPageRoute(builder: (_) => ProfileScreen(screenName: widget.screenName))),
+          child: Row(children: [
+            BuddyAvatar(bytes: app.buddyIcons[key], size: 26, dim: !online),
+            const SizedBox(width: 6),
+            Flexible(
+              child: Text.rich(
+                TextSpan(children: [
+                  TextSpan(text: name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                  TextSpan(text: '  $status', style: const TextStyle(fontSize: 11)),
+                ]),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ]),
+        ),
+      ),
+      icon(Icons.warning_amber_rounded, 'Warn', signedOn ? () => _warn(name) : null),
+      icon(blocked ? Icons.lock_open : Icons.block, blocked ? 'Unblock' : 'Block',
+          signedOn ? () => _block(name, !blocked) : null),
+      icon(Icons.person_add_alt_1, 'Add Buddy', signedOn && !buddy ? () => _addBuddy(name) : null),
+      icon(Icons.phone_in_talk, 'Talk (not available yet)', null),
+      icon(Icons.info_outline, 'Get Info', () => Navigator.of(context)
+          .push(MaterialPageRoute(builder: (_) => ProfileScreen(screenName: widget.screenName)))),
+    ]);
   }
 
   // ---------------------------------------------------------------- AIM button bar

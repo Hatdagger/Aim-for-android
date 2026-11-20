@@ -215,7 +215,7 @@ class AppSettings extends ChangeNotifier {
   double oskWidth(String kind) => _p.getDouble('oskW:$kind') ?? (kind == 'qwerty' ? 0.5 : 1 / 3);
 
   static const oskMinWidth = 0.18;
-  static const oskMaxWidth = 0.62;
+  static const oskMaxWidth = 0.9;
 
   void setOskPlacement(String kind, {double? x, double? y, double? width}) {
     if (x != null) _p.setDouble('oskX:$kind', x.clamp(0.0, 1.0));
@@ -232,6 +232,13 @@ class AppSettings extends ChangeNotifier {
     }
     notifyListeners();
   }
+
+  /// Phone fills the whole screen, hiding the chat (its little screen shows
+  /// the conversation). Portrait uses the keypad phones, landscape the slider.
+  bool get phoneFullPortrait => _p.getBool('phoneFullP') ?? false;
+  set phoneFullPortrait(bool v) => _set('phoneFullP', v);
+  bool get phoneFullLandscape => _p.getBool('phoneFullL') ?? false;
+  set phoneFullLandscape(bool v) => _set('phoneFullL', v);
 
   /// Asked Android once to let AIM run in the background (battery exemption).
   bool get askedBackground => _p.getBool('askedBg') ?? false;

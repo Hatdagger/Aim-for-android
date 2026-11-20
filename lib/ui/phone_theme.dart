@@ -267,7 +267,13 @@ class ShellBox extends StatelessWidget {
         color: color,
         borderRadius: radius,
         border: Border.all(color: ink, width: 5),
-        boxShadow: shadow ? const [BoxShadow(color: Color(0x38000000), offset: Offset(12, 12))] : null,
+        boxShadow: shadow
+            ? const [
+                // soft drop shadow so the phone reads as floating over the chat
+                BoxShadow(color: Color(0x59000000), blurRadius: 34, spreadRadius: 2, offset: Offset(0, 16)),
+                BoxShadow(color: Color(0x38000000), offset: Offset(12, 12)),
+              ]
+            : null,
       ),
       child: ClipRRect(
         borderRadius: radius,

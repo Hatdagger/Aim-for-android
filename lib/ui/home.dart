@@ -24,7 +24,16 @@ class _HomeShellState extends State<HomeShell> {
   Widget build(BuildContext context) {
     return LayoutBuilder(builder: (ctx, c) {
       final wide = c.maxWidth >= 820;
-      return Scaffold(
+      // Wide layout: Back closes the open chat first, then leaves as usual.
+      return PopScope(
+        canPop: !wide || _wideChat == null,
+        onPopInvokedWithResult: (didPop, _) {
+          if (!didPop && _wideChat != null) {
+            setState(() => _wideChat = null);
+            context.read<AppState>().openConversation(null);
+          }
+        },
+        child: Scaffold(
         body: SafeArea(
           child: Container(
             color: Retro.desktop,
@@ -32,6 +41,7 @@ class _HomeShellState extends State<HomeShell> {
             child: wide ? _wide(context) : BuddyListPane(onOpenChat: (sn) => _openNarrow(context, sn)),
           ),
         ),
+      ),
       );
     });
   }

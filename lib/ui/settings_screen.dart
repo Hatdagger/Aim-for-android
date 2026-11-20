@@ -152,6 +152,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     ),
                 ]),
                 const SizedBox(height: 6),
+                RetroCheckbox(
+                    value: s.phoneFullPortrait,
+                    label: 'Upright screen: phone fills the whole screen (keypad phone)',
+                    onChanged: (v) => s.phoneFullPortrait = v),
+                RetroCheckbox(
+                    value: s.phoneFullLandscape,
+                    label: 'Sideways screen: phone fills the whole screen (slide-out QWERTY)',
+                    onChanged: (v) => s.phoneFullLandscape = v),
+                const Text('Full screen hides the chat; the phone\'s own screen shows the conversation. '
+                    'Back closes the phone, Back again leaves the chat. Otherwise the phone floats over the chat '
+                    'and you can drag it around.',
+                    style: TextStyle(fontSize: 12)),
+                const SizedBox(height: 6),
                 const Text('Phone style'),
                 const SizedBox(height: 4),
                 Wrap(spacing: 6, runSpacing: 6, children: [

@@ -2,6 +2,7 @@ import 'dart:math';
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
 import '../app/input_mode.dart';
@@ -106,9 +107,11 @@ class OskController extends ChangeNotifier {
 /// Wraps the whole app and shows the cartoon phone while typing.
 ///
 /// Portrait: the phone slides up over a dimmed screen (its little screen shows
-/// the conversation). Landscape: the phone sits beside the app, which shrinks
-/// to fit the space left over. There the phone can be dragged anywhere,
-/// pinched or dragged by its corner to resize, or arranged with a controller.
+/// the conversation). Landscape: the phone floats over the app with a soft
+/// shadow; it can be dragged anywhere, pinched or dragged by its corner to
+/// resize, or arranged with a controller (RB).
+/// Full-screen options (Prefs): the phone fills the screen and hides the chat;
+/// portrait uses the tall keypad phones, landscape the sideways slider.
 class OskHost extends StatefulWidget {
   final Widget child;
   const OskHost({super.key, required this.child});
@@ -136,12 +139,46 @@ class _OskHostState extends State<OskHost> {
       if (req == null) {
         return Stack(children: [Positioned.fill(child: widget.child)]);
       }
-      final kind = s.keyboardKind;
+      final full = landscape ? s.phoneFullLandscape : s.phoneFullPortrait;
+      final kind = full ? (landscape ? 'qwerty' : 't9') : s.keyboardKind;
       final qwerty = kind == 'qwerty';
       final theme = phoneThemeById(s.phoneStyle);
       final art = PhoneArt.sizeFor(theme, qwerty);
       final aspect = art.width / art.height;
-      final phone = CartoonPhone(key: ValueKey(req), request: req, theme: theme, qwerty: qwerty);
+      final phone = CartoonPhone(key: ValueKey('${identityHashCode(req)}-$kind'), request: req, theme: theme, qwerty: qwerty);
+
+      Widget fullToggle(bool on) => Tooltip(
+            message: on ? 'Show the chat behind the phone' : 'Phone fills the screen',
+            child: RetroButton(
+              minWidth: 0,
+              minHeight: 34,
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              onPressed: () =>
+                  landscape ? s.phoneFullLandscape = !on : s.phoneFullPortrait = !on,
+              child: Row(mainAxisSize: MainAxisSize.min, children: [
+                Icon(on ? Icons.fullscreen_exit : Icons.fullscreen, size: 18),
+                const SizedBox(width: 4),
+                Text(on ? 'Show chat' : 'Full screen', style: const TextStyle(fontSize: 12)),
+              ]),
+            ),
+          );
+
+      // ---------------------------------------------------- full screen
+      if (full) {
+        const pad = 10.0, top = 52.0;
+        var w = W - pad * 2;
+        var h = w / aspect;
+        if (h > H - top - pad) {
+          h = H - top - pad;
+          w = h * aspect;
+        }
+        return Stack(children: [
+          Positioned.fill(child: widget.child),
+          const Positioned.fill(child: ColoredBox(color: Retro.desktop)),
+          Positioned(left: (W - w) / 2, top: top + (H - top - pad - h) / 2, width: w, height: h, child: phone),
+          Positioned(left: 8, top: 8, child: SafeArea(child: fullToggle(true))),
+        ]);
+      }
 
       if (!landscape) {
         var w = qwerty ? W : min(W * 0.98, H * 0.66 * aspect);
@@ -159,10 +196,11 @@ class _OskHostState extends State<OskHost> {
             ),
           ),
           Positioned(left: (W - w) / 2, width: w, bottom: 0, height: h, child: SafeArea(top: false, child: phone)),
+          Positioned(right: 8, bottom: h + 8, child: fullToggle(false)),
         ]);
       }
 
-      // ---------------------------------------------------- landscape
+      // ---------------------------------------------------- landscape, floating
       final x = _x ?? s.oskX(kind), y = _y ?? s.oskY(kind);
       final wf = (_w ?? s.oskWidth(kind)).clamp(AppSettings.oskMinWidth, AppSettings.oskMaxWidth);
       var w = wf * W;
@@ -173,10 +211,6 @@ class _OskHostState extends State<OskHost> {
       }
       final freeX = max(1.0, W - w), freeY = max(1.0, H - h);
       final left = freeX * x, top = freeY * y;
-      final leftSpace = left, rightSpace = W - left - w;
-      final contentRect = leftSpace >= rightSpace
-          ? Rect.fromLTWH(0, 0, max(leftSpace, 120), H)
-          : Rect.fromLTWH(left + w, 0, max(rightSpace, 120), H);
       final onRight = left + w / 2 > W / 2;
 
       void move(Offset d) => setState(() {
@@ -191,8 +225,7 @@ class _OskHostState extends State<OskHost> {
       }
 
       return Stack(children: [
-        const Positioned.fill(child: ColoredBox(color: Retro.desktop)),
-        Positioned.fromRect(rect: contentRect, child: widget.child),
+        Positioned.fill(child: widget.child),
         Positioned(
           left: left,
           top: top,
@@ -208,6 +241,7 @@ class _OskHostState extends State<OskHost> {
                 onSmaller: () => s.setOskPlacement(kind, width: wf - 0.04),
                 onBigger: () => s.setOskPlacement(kind, width: wf + 0.04),
                 onDock: () => s.setOskPlacement(kind, x: 1.0, y: 0.5, width: qwerty ? 0.5 : 1 / 3),
+                onFull: () => s.phoneFullLandscape = true,
                 onWheel: (dy) {
                   resize((_w ?? wf) - dy * 0.0006);
                   save();
@@ -260,11 +294,26 @@ class _OskHostState extends State<OskHost> {
   }
 }
 
+/// Registered before the app starts so it sees Back first: while the phone
+/// keyboard is open, Back closes it (showing the chat); the next Back then
+/// leaves the chat as usual.
+class OskBackObserver with WidgetsBindingObserver {
+  final OskController osk;
+  OskBackObserver(this.osk);
+
+  @override
+  Future<bool> didPopRoute() async {
+    if (osk.current == null) return false;
+    osk.close();
+    return true;
+  }
+}
+
 class _ArrangeBar extends StatelessWidget {
   final double height;
   final bool arranging;
   final void Function(Offset) onMove;
-  final VoidCallback onMoveEnd, onSmaller, onBigger, onDock;
+  final VoidCallback onMoveEnd, onSmaller, onBigger, onDock, onFull;
   final void Function(double dy) onWheel;
   const _ArrangeBar({
     required this.height,
@@ -274,6 +323,7 @@ class _ArrangeBar extends StatelessWidget {
     required this.onSmaller,
     required this.onBigger,
     required this.onDock,
+    required this.onFull,
     required this.onWheel,
   });
 
@@ -327,6 +377,7 @@ class _ArrangeBar extends StatelessWidget {
           _btn(Icons.remove_circle_outline, 'Smaller', onSmaller),
           _btn(Icons.add_circle_outline, 'Bigger', onBigger),
           _btn(Icons.vertical_align_center, 'Put back on the right', onDock),
+          _btn(Icons.fullscreen, 'Phone fills the screen', onFull),
           const SizedBox(width: 4),
         ]),
       ),
@@ -536,7 +587,9 @@ class _CartoonPhoneState extends State<CartoonPhone> with SingleTickerProviderSt
       shift: _shift,
       sym: _sym,
     );
-    return FocusScope(
+    return CallbackShortcuts(
+      bindings: {const SingleActivator(LogicalKeyboardKey.escape): () => _leave(false)},
+      child: FocusScope(
       node: _scope,
       child: AnimatedBuilder(
         animation: _anim,
@@ -564,6 +617,7 @@ class _CartoonPhoneState extends State<CartoonPhone> with SingleTickerProviderSt
             ),
           );
         },
+      ),
       ),
     );
   }
