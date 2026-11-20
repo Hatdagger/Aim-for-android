@@ -63,7 +63,7 @@ jobs:
             sleep 1
           done
           tail -20 "$RUNNER_TEMP/oos.log"
-          for u in alice bob carol; do
+          for u in alice bob carol dave erin; do
             curl -fsS -d "{\"screen_name\":\"$u\",\"password\":\"password1\"}" http://127.0.0.1:8080/user || true
             echo
           done

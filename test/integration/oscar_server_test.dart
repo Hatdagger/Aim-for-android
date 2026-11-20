@@ -10,7 +10,7 @@ import 'package:crypto/crypto.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 /// End-to-end tests against a running Open OSCAR Server.
-/// Set OSCAR_SERVER=host:port. Accounts alice/bob/carol with password
+/// Set OSCAR_SERVER=host:port. Accounts alice/bob/carol/dave/erin with password
 /// "password1" must exist (CI creates them through the management API).
 final _server = Platform.environment['OSCAR_SERVER'];
 const _pw = 'password1';
@@ -178,8 +178,8 @@ void main() {
   }, skip: skip, timeout: t);
 
   test('warn, block (buddy sees you go offline) and unblock', () async {
-    final b = _client('bob');
-    final c = _client('carol');
+    final b = _client('dave');
+    final c = _client('erin');
     b.start();
     c.start();
     await _online(b);
@@ -187,30 +187,30 @@ void main() {
 
     // bob watches carol
     bool carolIs(OscarEvent e, Type t) =>
-        (e is BuddyArrived && t == BuddyArrived && normalizeSn(e.info.screenName) == 'carol') ||
-        (e is BuddyDeparted && t == BuddyDeparted && normalizeSn(e.screenName) == 'carol');
-    if (!b.session!.isBuddy('carol')) {
-      await b.session!.addBuddy('carol', 'Buddies');
+        (e is BuddyArrived && t == BuddyArrived && normalizeSn(e.info.screenName) == 'erin') ||
+        (e is BuddyDeparted && t == BuddyDeparted && normalizeSn(e.screenName) == 'erin');
+    if (!b.session!.isBuddy('erin')) {
+      await b.session!.addBuddy('erin', 'Buddies');
     }
     await Future<void>.delayed(const Duration(seconds: 1));
 
     // warn needs a message from bob first
     final got = _nextMessage(c);
-    b.send('carol', 'spam spam');
+    b.send('erin', 'spam spam');
     await got;
-    final level = await c.session!.warn('bob');
+    final level = await c.session!.warn('dave');
     expect(level, greaterThan(0));
 
     // block: bob sees carol leave
     final left = b.events.firstWhere((e) => e is SessionEvent && carolIs(e.event, BuddyDeparted));
-    await c.session!.block('bob');
-    expect(c.session!.isBlocked('bob'), isTrue);
+    await c.session!.block('dave');
+    expect(c.session!.isBlocked('dave'), isTrue);
     await left.timeout(const Duration(seconds: 15));
 
     // unblock: carol comes back
     final back = b.events.firstWhere((e) => e is SessionEvent && carolIs(e.event, BuddyArrived));
-    await c.session!.unblock('bob');
-    expect(c.session!.isBlocked('bob'), isFalse);
+    await c.session!.unblock('dave');
+    expect(c.session!.isBlocked('dave'), isFalse);
     await back.timeout(const Duration(seconds: 15));
 
     await b.dispose();
