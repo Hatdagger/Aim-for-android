@@ -73,7 +73,8 @@ void main() {
               ),
             ),
           );
-          expect(tester.takeException(), isNull);
+          final ex = tester.takeException();
+          expect(ex, isNull, reason: 'open=$open: ${ex is FlutterError ? ex.toStringDeep() : ex}');
         }
       });
     }

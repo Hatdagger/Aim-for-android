@@ -646,8 +646,10 @@ class MiniScreen extends StatelessWidget {
         ]),
         const SizedBox(height: 4),
         Expanded(
-          child: ClipRect(
-            child: Column(mainAxisAlignment: MainAxisAlignment.end, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          child: SingleChildScrollView(
+            reverse: true,
+            physics: const NeverScrollableScrollPhysics(),
+            child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
               for (final l in lines)
                 Text.rich(
                   TextSpan(children: [

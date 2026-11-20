@@ -274,7 +274,7 @@ class PhoneArt extends StatelessWidget {
           ink: t.ink,
           radius: const BorderRadius.vertical(top: Radius.circular(26), bottom: Radius.circular(80)),
           padding: const EdgeInsets.fromLTRB(22, 18, 22, 20),
-          child: Column(children: [_softRow(), _keypad(), const Spacer(), _speakerSlot()]),
+          child: ClipRect(child: OverflowBox(alignment: Alignment.topCenter, maxHeight: double.infinity, child: Column(mainAxisSize: MainAxisSize.min, children: [_softRow(), _keypad(), const SizedBox(height: 16), _speakerSlot()]))),
         ),
       ),
       if (t.strap != null)
@@ -360,15 +360,18 @@ class PhoneArt extends StatelessWidget {
     return Container(
       width: 160,
       height: 110,
+      padding: const EdgeInsets.all(10),
       decoration: BoxDecoration(
         color: t.screenOn,
         borderRadius: BorderRadius.circular(40),
         border: Border.all(color: t.ink, width: 5),
       ),
-      child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-        Text(time, style: TextStyle(color: t.screenInk, fontSize: 34, fontWeight: FontWeight.w800)),
-        Text('AIM', style: TextStyle(color: t.screenInk, fontSize: 12)),
-      ]),
+      child: FittedBox(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          Text(time, style: TextStyle(color: t.screenInk, fontSize: 34, fontWeight: FontWeight.w800)),
+          Text('AIM', style: TextStyle(color: t.screenInk, fontSize: 12)),
+        ]),
+      ),
     );
   }
 
@@ -392,7 +395,7 @@ class PhoneArt extends StatelessWidget {
           ink: t.ink,
           shine: false,
           radius: const BorderRadius.vertical(top: Radius.circular(30), bottom: Radius.circular(70)),
-          padding: const EdgeInsets.fromLTRB(20, 44, 20, 10),
+          padding: const EdgeInsets.fromLTRB(20, 34, 20, 6),
           child: _qwertyKeys(),
         ),
       ),
