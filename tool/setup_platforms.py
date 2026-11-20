@@ -82,12 +82,22 @@ def patch_android():
 
 
 def patch_signing():
-    """Sign every build with the same key (android_overlay/aim-release.jks).
+    """Sign every build with the same private key, so updates install over the old app.
 
-    Without this, each CI run signs with a brand-new throwaway debug key and
-    Android refuses to update ("package conflicts with an existing package").
+    CI writes the key from the ANDROID_KEYSTORE secret to a temp file and passes its
+    path and password in AIM_KEYSTORE / AIM_KEY_PASSWORD. Without a key the build
+    stops instead of quietly using a throwaway key (which breaks updating).
     """
-    ks = os.path.join(OVERLAY, 'aim-release.jks').replace('\\', '/')
+    ks = os.environ.get('AIM_KEYSTORE', '')
+    pw = os.environ.get('AIM_KEY_PASSWORD', '')
+    if not ks or not os.path.exists(ks) or not pw:
+        if os.environ.get('CI'):
+            sys.exit('Signing key missing: add the ANDROID_KEYSTORE and ANDROID_KEY_PASSWORD '
+                     'repository secrets (Settings > Secrets and variables > Actions).')
+        print('android: no signing key given, local build uses the debug key')
+        return
+    ks = ks.replace('\\', '/')
+    pw_esc = pw.replace('\\', '\\\\').replace('"', '\\"').replace('$', '\\$')
     kts = os.path.join(ROOT, 'android', 'app', 'build.gradle.kts')
     groovy = os.path.join(ROOT, 'android', 'app', 'build.gradle')
     if os.path.exists(kts):
@@ -96,9 +106,9 @@ def patch_signing():
             '    signingConfigs {\n'
             '        create("aim") {\n'
             f'            storeFile = file("{ks}")\n'
-            '            storePassword = "aimforandroid"\n'
+            f'            storePassword = "{pw_esc}"\n'
             '            keyAlias = "aim"\n'
-            '            keyPassword = "aimforandroid"\n'
+            f'            keyPassword = "{pw_esc}"\n'
             '        }\n'
             '    }\n'
         )
@@ -110,9 +120,9 @@ def patch_signing():
             '    signingConfigs {\n'
             '        aim {\n'
             f'            storeFile file("{ks}")\n'
-            '            storePassword "aimforandroid"\n'
+            f'            storePassword "{pw_esc}"\n'
             '            keyAlias "aim"\n'
-            '            keyPassword "aimforandroid"\n'
+            f'            keyPassword "{pw_esc}"\n'
             '        }\n'
             '    }\n'
         )
@@ -125,7 +135,7 @@ def patch_signing():
     if use not in s:
         sys.exit('could not set the release signing key in ' + p)
     write(p, s)
-    print('android: release builds signed with the fixed AIM key')
+    print('android: release builds signed with the private AIM key')
 
 
 def patch_desktop():

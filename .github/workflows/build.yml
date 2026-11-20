@@ -127,7 +127,17 @@ jobs:
           channel: ${{ env.FLUTTER_CHANNEL }}
           cache: true
       - run: flutter create --project-name aim_for_android --org com.hatdagger --platforms android .
+      - name: Signing key (from repository secrets)
+        env:
+          ANDROID_KEYSTORE: ${{ secrets.ANDROID_KEYSTORE }}
+        run: |
+          if [ -n "$ANDROID_KEYSTORE" ]; then
+            printf '%s' "$ANDROID_KEYSTORE" | tr -d ' \r\n' | base64 -d > "$RUNNER_TEMP/aim-release.jks"
+            echo "AIM_KEYSTORE=$RUNNER_TEMP/aim-release.jks" >> "$GITHUB_ENV"
+          fi
       - run: python3 tool/setup_platforms.py
+        env:
+          AIM_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
       - run: flutter build apk --release --build-number=${{ github.run_number }} --dart-define=AIM_BUILD=${{ github.run_number }} --dart-define=AIM_COMMIT=${{ github.sha }}
       - run: cp build/app/outputs/flutter-apk/app-release.apk aim-android.apk
       - uses: actions/upload-artifact@v4
