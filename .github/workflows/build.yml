@@ -1,0 +1,162 @@
+name: Build and test
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  FLUTTER_CHANNEL: stable
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: ${{ env.FLUTTER_CHANNEL }}
+          cache: true
+      - run: flutter pub get
+      - name: Analyze
+        run: flutter analyze --no-fatal-infos --no-fatal-warnings
+
+      - name: Download AIM 5.1 installer from archive.org (for the importer test only)
+        run: |
+          curl -fL --retry 3 -o "$RUNNER_TEMP/aim513036.exe" https://archive.org/download/aim513036/aim513036.exe
+          sha1sum "$RUNNER_TEMP/aim513036.exe"
+
+      - name: Get Open OSCAR Server
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -e
+          mkdir -p "$RUNNER_TEMP/oos" && cd "$RUNNER_TEMP/oos"
+          gh release view -R mk6i/open-oscar-server --json tagName,assets -q '.tagName, .assets[].name'
+          gh release download -R mk6i/open-oscar-server --pattern '*linux*x86_64*' || \
+            gh release download -R mk6i/open-oscar-server --pattern '*linux*amd64*'
+          for f in *; do
+            case "$f" in
+              *.tar.gz|*.tgz) tar xzf "$f" ;;
+              *.zip) unzip -q "$f" ;;
+            esac
+          done
+          BIN=$(find . -type f -name 'open_oscar_server*' ! -name '*.tar.gz' ! -name '*.zip' | head -1)
+          echo "binary: $BIN"
+          chmod +x "$BIN"
+          echo "OOS_BIN=$RUNNER_TEMP/oos/$BIN" >> "$GITHUB_ENV"
+          echo "OOS_DIR=$RUNNER_TEMP/oos/$(dirname "$BIN")" >> "$GITHUB_ENV"
+
+      - name: Start Open OSCAR Server (passwords required)
+        run: |
+          cd "$OOS_DIR"
+          ls -la
+          DISABLE_AUTH=false nohup "$OOS_BIN" > "$RUNNER_TEMP/oos.log" 2>&1 &
+          for i in $(seq 1 60); do
+            if nc -z 127.0.0.1 5190 && nc -z 127.0.0.1 8080; then break; fi
+            sleep 1
+          done
+          tail -20 "$RUNNER_TEMP/oos.log"
+          for u in alice bob carol; do
+            curl -fsS -d "{\"screen_name\":\"$u\",\"password\":\"password1\"}" http://127.0.0.1:8080/user || true
+            echo
+          done
+          curl -fsS http://127.0.0.1:8080/user || true
+
+      - name: Tests (unit, installer import, live server)
+        env:
+          AIM_INSTALLER: ${{ runner.temp }}/aim513036.exe
+          OSCAR_SERVER: 127.0.0.1:5190
+        run: flutter test --reporter expanded
+
+      - name: Server log
+        if: always()
+        run: tail -200 "$RUNNER_TEMP/oos.log" || true
+
+  android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: ${{ env.FLUTTER_CHANNEL }}
+          cache: true
+      - run: flutter create --project-name aim_for_android --org com.hatdagger --platforms android .
+      - run: python3 tool/setup_platforms.py
+      - run: flutter build apk --release
+      - run: cp build/app/outputs/flutter-apk/app-release.apk aim-android.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: aim-android
+          path: aim-android.apk
+
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Linux build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev \
+            libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev libsecret-1-dev libjsoncpp-dev
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: ${{ env.FLUTTER_CHANNEL }}
+          cache: true
+      - run: flutter create --project-name aim_for_android --org com.hatdagger --platforms linux .
+      - run: python3 tool/setup_platforms.py
+      - run: flutter build linux --release
+      - run: tar czf aim-linux.tar.gz -C build/linux/x64/release bundle
+      - uses: actions/upload-artifact@v4
+        with:
+          name: aim-linux
+          path: aim-linux.tar.gz
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: ${{ env.FLUTTER_CHANNEL }}
+          cache: true
+      - run: flutter create --project-name aim_for_android --org com.hatdagger --platforms windows .
+      - run: python tool/setup_platforms.py
+      - run: flutter build windows --release
+      - shell: pwsh
+        run: Compress-Archive -Path build/windows/x64/runner/Release/* -DestinationPath aim-windows.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: aim-windows
+          path: aim-windows.zip
+
+  release:
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    needs: [android, linux, windows]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Publish "latest" release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          name: Latest build
+          prerelease: true
+          make_latest: true
+          body: |
+            Automatic build of ${{ github.sha }}.
+            - Android: aim-android.apk (allow installing from unknown sources)
+            - Windows: aim-windows.zip (unzip, run aim_for_android.exe)
+            - Linux / Steam Deck: aim-linux.tar.gz (extract, run bundle/aim_for_android)
+          files: dist/*
