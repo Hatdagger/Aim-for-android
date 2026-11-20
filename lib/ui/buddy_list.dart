@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 
 import '../app/app_state.dart';
 import '../oscar/aim_html.dart';
+import '../oscar/bytes.dart';
 import '../oscar/client.dart';
 import '../oscar/models.dart';
 import 'profile_screen.dart';
@@ -23,8 +24,10 @@ class BuddyListPane extends StatefulWidget {
 }
 
 class _BuddyListPaneState extends State<BuddyListPane> {
-  int _tab = 0; // 0 buddies, 1 chats
   final Set<String> _collapsed = {};
+
+  /// Messages waiting from [sn] (0 when none).
+  int _unread(AppState app, String sn) => app.conversations[normalizeSn(sn)]?.unread ?? 0;
 
   @override
   Widget build(BuildContext context) {
@@ -38,15 +41,9 @@ class _BuddyListPaneState extends State<BuddyListPane> {
         children: [
           _statusBar(app),
           const SizedBox(height: 4),
-          Row(children: [
-            Expanded(child: _tabButton('Buddies', 0)),
-            const SizedBox(width: 4),
-            Expanded(child: _tabButton(app.totalUnread > 0 ? 'Chats (${app.totalUnread})' : 'Chats', 1)),
-          ]),
-          const SizedBox(height: 4),
           Expanded(
             child: Sunken(
-              child: FocusTraversalGroup(child: _tab == 0 ? _buddies(app) : _chats(app)),
+              child: FocusTraversalGroup(child: _buddies(app)),
             ),
           ),
           const SizedBox(height: 4),
@@ -55,12 +52,6 @@ class _BuddyListPaneState extends State<BuddyListPane> {
       ),
     );
   }
-
-  Widget _tabButton(String label, int i) => RetroButton(
-        onPressed: () => setState(() => _tab = i),
-        minWidth: 0,
-        child: Text(label, style: TextStyle(fontWeight: _tab == i ? FontWeight.bold : FontWeight.normal)),
-      );
 
   Widget _statusBar(AppState app) {
     String? text;
@@ -92,10 +83,33 @@ class _BuddyListPaneState extends State<BuddyListPane> {
     final offline = <BuddyView>[];
     final children = <Widget>[];
     var first = true;
+
+    // People who messaged you but are not on your Buddy List get their own
+    // group at the top, so the one list is also the list of chats.
+    final known = {for (final (_, bs) in groups) for (final b in bs) normalizeSn(b.screenName)};
+    final strangers = app.conversations.values.where((c) => !known.contains(c.key)).toList()
+      ..sort((a, b) => b.unread.compareTo(a.unread));
+    if (strangers.isNotEmpty) {
+      const name = 'Not on My List';
+      children.add(_groupHeader(name, 0, strangers.length,
+          autofocus: true, showCount: false, unread: strangers.fold(0, (a, c) => a + c.unread)));
+      first = false;
+      if (!_collapsed.contains(name)) {
+        for (final c in strangers) {
+          children.add(_buddyRow(
+            app,
+            BuddyView(c.displayName, app.isBuddyOnline(c.displayName), false, 0, app.buddyIcons[c.key]),
+            onList: false,
+          ));
+        }
+      }
+    }
+
     for (final (name, buddies) in groups) {
       final on = buddies.where((b) => b.online).toList();
       offline.addAll(buddies.where((b) => !b.online));
-      children.add(_groupHeader(name, on.length, buddies.length, autofocus: first));
+      children.add(_groupHeader(name, on.length, buddies.length,
+          autofocus: first, unread: buddies.fold(0, (a, b) => a + _unread(app, b.screenName))));
       first = false;
       if (!_collapsed.contains(name)) {
         for (final b in on) {
@@ -104,7 +118,8 @@ class _BuddyListPaneState extends State<BuddyListPane> {
       }
     }
     if (offline.isNotEmpty) {
-      children.add(_groupHeader('Offline', 0, offline.length, autofocus: false, showCount: false));
+      children.add(_groupHeader('Offline', 0, offline.length,
+          autofocus: false, showCount: false, unread: offline.fold(0, (a, b) => a + _unread(app, b.screenName))));
       if (!_collapsed.contains('Offline')) {
         for (final b in offline) {
           children.add(_buddyRow(app, b));
@@ -120,7 +135,8 @@ class _BuddyListPaneState extends State<BuddyListPane> {
     return ListView(padding: EdgeInsets.zero, children: children);
   }
 
-  Widget _groupHeader(String name, int on, int total, {required bool autofocus, bool showCount = true}) {
+  Widget _groupHeader(String name, int on, int total,
+      {required bool autofocus, bool showCount = true, int unread = 0}) {
     final collapsed = _collapsed.contains(name);
     return RetroListTile(
       autofocus: autofocus,
@@ -131,6 +147,8 @@ class _BuddyListPaneState extends State<BuddyListPane> {
           child: Text(showCount ? '$name ($on/$total)' : '$name ($total)',
               overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.bold)),
         ),
+        // A closed group still shows that someone inside it is waiting.
+        if (collapsed && unread > 0) Padding(padding: const EdgeInsets.only(right: 6), child: UnreadBadge(unread)),
         if (showCount)
           RetroButton(
             minWidth: 0,
@@ -274,10 +292,12 @@ class _BuddyListPaneState extends State<BuddyListPane> {
     await _try('Move Buddy', () => app.moveBuddy(sn, gid));
   }
 
-  Widget _buddyRow(AppState app, BuddyView b) {
+  Widget _buddyRow(AppState app, BuddyView b, {bool onList = true}) {
+    final unread = _unread(app, b.screenName);
+    final menu = onList ? () => _buddyMenu(app, b.screenName) : () => _strangerMenu(app, b.screenName);
     return RetroListTile(
       onTap: () => widget.onOpenChat(b.screenName),
-      onLongPress: () => _buddyMenu(app, b.screenName),
+      onLongPress: menu,
       child: Padding(
         padding: const EdgeInsets.only(left: 18),
         child: Row(children: [
@@ -289,10 +309,14 @@ class _BuddyListPaneState extends State<BuddyListPane> {
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
                 fontStyle: b.away ? FontStyle.italic : FontStyle.normal,
-                color: b.online ? null : Retro.shadow,
+                // New messages: the name goes big, heavy and black.
+                fontWeight: unread > 0 ? FontWeight.w900 : FontWeight.normal,
+                fontSize: unread > 0 ? 16 : null,
+                color: b.online || unread > 0 ? null : Retro.shadow,
               ),
             ),
           ),
+          if (unread > 0) Padding(padding: const EdgeInsets.only(left: 4), child: UnreadBadge(unread)),
           if (b.away) const Icon(Icons.description_outlined, size: 16),
           if (b.idleMinutes > 0)
             Padding(
@@ -303,7 +327,7 @@ class _BuddyListPaneState extends State<BuddyListPane> {
             tooltip: 'More for ${b.screenName}',
             visualDensity: VisualDensity.compact,
             iconSize: 18,
-            onPressed: () => _buddyMenu(app, b.screenName),
+            onPressed: menu,
             icon: const Icon(Icons.more_vert),
           ),
         ]),
@@ -313,48 +337,28 @@ class _BuddyListPaneState extends State<BuddyListPane> {
 
   String _idle(int m) => m < 60 ? '(${m}m)' : '(${m ~/ 60}h)';
 
-  Widget _chats(AppState app) {
-    final convs = app.conversations.values.toList()
-      ..sort((a, b) {
-        final ta = a.lines.isEmpty ? DateTime(2000) : a.lines.last.time;
-        final tb = b.lines.isEmpty ? DateTime(2000) : b.lines.last.time;
-        return tb.compareTo(ta);
-      });
-    if (convs.isEmpty) {
-      return const Padding(padding: EdgeInsets.all(12), child: Text('No conversations yet.'));
-    }
-    return ListView(
-      padding: EdgeInsets.zero,
-      children: [
-        for (var i = 0; i < convs.length; i++)
-          RetroListTile(
-            autofocus: i == 0,
-            onTap: () => widget.onOpenChat(convs[i].displayName),
-            onLongPress: () => app.closeConversation(convs[i].key),
-            child: Row(children: [
-              BuddyAvatar(bytes: app.buddyIcons[convs[i].key], size: 34, dim: !app.isBuddyOnline(convs[i].displayName)),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Text(convs[i].displayName, style: const TextStyle(fontWeight: FontWeight.bold)),
-                  if (convs[i].lines.isNotEmpty)
-                    Text(
-                      '${convs[i].lines.last.mine ? 'You: ' : ''}${convs[i].lines.last.text}',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                ]),
-              ),
-              if (convs[i].unread > 0)
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
-                  color: Retro.myName,
-                  child: Text('${convs[i].unread}', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-                ),
-            ]),
-          ),
-      ],
-    );
+  /// Menu for someone who messaged you but is not on your Buddy List.
+  void _strangerMenu(AppState app, String sn) {
+    showRetroDialog<void>(context, title: sn, builder: (ctx) {
+      Widget b(String label, VoidCallback f, {bool autofocus = false}) => Padding(
+            padding: const EdgeInsets.only(bottom: 4),
+            child: RetroButton(
+              autofocus: autofocus,
+              onPressed: () {
+                Navigator.of(ctx).pop();
+                f();
+              },
+              child: Text(label),
+            ),
+          );
+      return Column(crossAxisAlignment: CrossAxisAlignment.stretch, mainAxisSize: MainAxisSize.min, children: [
+        b('Send Message', () => widget.onOpenChat(sn), autofocus: true),
+        b('Get Info', () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => ProfileScreen(screenName: sn)))),
+        b('Add to Buddy List…', () => _addBuddyDialog(app, sn0: sn)),
+        b('Close this conversation', () => app.closeConversation(normalizeSn(sn))),
+        RetroButton(onPressed: () => Navigator.of(ctx).pop(), child: const Text('Cancel')),
+      ]);
+    });
   }
 
   Widget _toolbar(AppState app) {
@@ -478,8 +482,8 @@ class _BuddyListPaneState extends State<BuddyListPane> {
     });
   }
 
-  void _addBuddyDialog(AppState app, {String? group0}) {
-    final sn = TextEditingController();
+  void _addBuddyDialog(AppState app, {String? group0, String? sn0}) {
+    final sn = TextEditingController(text: sn0 ?? '');
     final group = TextEditingController(text: group0 ?? (app.rawGroups.firstOrNull?.name ?? 'Buddies'));
     showRetroDialog<void>(context, title: 'Add Buddy', builder: (ctx) {
       return Column(crossAxisAlignment: CrossAxisAlignment.stretch, mainAxisSize: MainAxisSize.min, children: [
@@ -529,5 +533,34 @@ class _BuddyListPaneState extends State<BuddyListPane> {
         ]),
       ]);
     });
+  }
+}
+
+/// The red "new messages" alert shown beside a buddy's name: an envelope and
+/// how many messages are waiting.
+class UnreadBadge extends StatelessWidget {
+  final int count;
+  const UnreadBadge(this.count, {super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      label: '$count new ${count == 1 ? 'message' : 'messages'}',
+      excludeSemantics: true,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+        decoration: BoxDecoration(
+          color: Retro.myName,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: Colors.white, width: 1.5),
+        ),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          const Icon(Icons.mail, size: 14, color: Colors.white),
+          const SizedBox(width: 3),
+          Text(count > 99 ? '99+' : '$count',
+              style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w900, fontSize: 13)),
+        ]),
+      ),
+    );
   }
 }

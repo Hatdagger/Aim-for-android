@@ -77,7 +77,55 @@ def patch_android():
         )
         man = man.replace('        </activity>', link_filter + '        </activity>', 1)
     write(man_p, man)
+    patch_signing()
     print('android: patched', pkg)
+
+
+def patch_signing():
+    """Sign every build with the same key (android_overlay/aim-release.jks).
+
+    Without this, each CI run signs with a brand-new throwaway debug key and
+    Android refuses to update ("package conflicts with an existing package").
+    """
+    ks = os.path.join(OVERLAY, 'aim-release.jks').replace('\\', '/')
+    kts = os.path.join(ROOT, 'android', 'app', 'build.gradle.kts')
+    groovy = os.path.join(ROOT, 'android', 'app', 'build.gradle')
+    if os.path.exists(kts):
+        p, s = kts, read(kts)
+        block = (
+            '    signingConfigs {\n'
+            '        create("aim") {\n'
+            f'            storeFile = file("{ks}")\n'
+            '            storePassword = "aimforandroid"\n'
+            '            keyAlias = "aim"\n'
+            '            keyPassword = "aimforandroid"\n'
+            '        }\n'
+            '    }\n'
+        )
+        use = 'signingConfig = signingConfigs.getByName("aim")'
+        s = re.sub(r'signingConfig\s*=\s*signingConfigs\.getByName\("debug"\)', use, s)
+    elif os.path.exists(groovy):
+        p, s = groovy, read(groovy)
+        block = (
+            '    signingConfigs {\n'
+            '        aim {\n'
+            f'            storeFile file("{ks}")\n'
+            '            storePassword "aimforandroid"\n'
+            '            keyAlias "aim"\n'
+            '            keyPassword "aimforandroid"\n'
+            '        }\n'
+            '    }\n'
+        )
+        use = 'signingConfig signingConfigs.aim'
+        s = re.sub(r'signingConfig\s+signingConfigs\.debug', use, s)
+    else:
+        sys.exit('android/app/build.gradle(.kts) not found')
+    if 'signingConfigs {' not in s:
+        s = s.replace('    buildTypes {', block + '    buildTypes {', 1)
+    if use not in s:
+        sys.exit('could not set the release signing key in ' + p)
+    write(p, s)
+    print('android: release builds signed with the fixed AIM key')
 
 
 def patch_desktop():

@@ -59,7 +59,7 @@ class _HomeShellState extends State<HomeShell> {
         child: chat == null
             ? Center(
                 child: Text(
-                  app.totalUnread > 0 ? 'You have new messages — open Chats.' : 'Pick a buddy to start a conversation.',
+                  app.totalUnread > 0 ? 'You have new messages — look for the red alerts in your Buddy List.' : 'Pick a buddy to start a conversation.',
                   style: const TextStyle(color: Colors.white, fontSize: 16),
                 ),
               )
