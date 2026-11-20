@@ -6,12 +6,16 @@ import 'package:provider/provider.dart';
 import '../app/app_state.dart';
 import '../app/history.dart';
 import '../app/input_mode.dart';
+import '../app/settings.dart';
 import '../oscar/aim_html.dart';
 import '../oscar/bytes.dart';
 import '../oscar/client.dart';
 import 'profile_screen.dart';
 import 'retro.dart';
+import 'color_picker.dart';
 import 'retro_text_field.dart';
+import 't9_phone.dart';
+import 'wallpaper.dart';
 
 /// One conversation, laid out like a texting app inside a classic IM window.
 class ChatPane extends StatefulWidget {
@@ -128,6 +132,12 @@ class _ChatPaneState extends State<ChatPane> {
     return RetroWindow(
       title: '${conv.displayName} - Instant Message',
       onClose: widget.onClose,
+      titleActions: [
+        _titleIcon(Icons.format_color_text, 'My text colours', _pickColors),
+        const SizedBox(width: 3),
+        _titleIcon(Icons.wallpaper, 'Wallpaper (only you see it)', _pickWallpaper),
+        const SizedBox(width: 4),
+      ],
       padding: const EdgeInsets.all(4),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -156,21 +166,30 @@ class _ChatPaneState extends State<ChatPane> {
           const SizedBox(height: 4),
           Expanded(
             child: Sunken(
-              child: ListView.builder(
+              padding: EdgeInsets.zero,
+              child: Stack(fit: StackFit.expand, children: [
+                ChatWallpaper(spec: context.watch<AppSettings>().wallpaperFor(widget.screenName)),
+                ListView.builder(
                 controller: _scroll,
                 padding: const EdgeInsets.all(6),
                 itemCount: lines.length + (conv.typing == 2 ? 1 : 0),
                 itemBuilder: (ctx, i) {
                   if (i == lines.length) {
-                    return Padding(
-                      padding: const EdgeInsets.all(4),
-                      child: Text('${conv.displayName} is typing…',
-                          style: const TextStyle(fontStyle: FontStyle.italic, color: Retro.shadow)),
+                    return Align(
+                      alignment: Alignment.centerLeft,
+                      child: Container(
+                        margin: const EdgeInsets.all(4),
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                        color: const Color(0xCCFFFFFF),
+                        child: Text('${conv.displayName} is typing…',
+                            style: const TextStyle(fontStyle: FontStyle.italic, color: Color(0xFF404040))),
+                      ),
                     );
                   }
                   return _bubble(app, lines[i]);
                 },
               ),
+              ]),
             ),
           ),
           const SizedBox(height: 4),
@@ -182,6 +201,11 @@ class _ChatPaneState extends State<ChatPane> {
             enterSubmits: true,
             action: TextInputAction.send,
             doneLabel: 'Send',
+            oskPreview: () => [
+              for (final l in _app.conversationFor(widget.screenName).lines.reversed.take(5).toList().reversed)
+                OskLine(l.mine ? 'me' : l.from, l.text, l.mine),
+            ],
+            oskPreviewListen: _app,
             onChanged: _onChanged,
             onSubmitted: (_) => _send(),
           ),
@@ -245,6 +269,40 @@ class _ChatPaneState extends State<ChatPane> {
     );
   }
 
+  Widget _titleIcon(IconData icon, String tip, VoidCallback onPressed) => Tooltip(
+        message: tip,
+        child: RetroButton(
+          minWidth: 0,
+          minHeight: 22,
+          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+          semanticLabel: tip,
+          onPressed: onPressed,
+          child: Icon(icon, size: 15),
+        ),
+      );
+
+  Future<void> _pickWallpaper() async {
+    final s = context.read<AppSettings>();
+    final r = await pickWallpaper(context,
+        current: s.wallpaperFor(widget.screenName), allowDefault: s.wallpaperOverride(widget.screenName) != null);
+    if (r == null) return;
+    s.setWallpaperFor(widget.screenName, r == '*' ? null : r);
+  }
+
+  Future<void> _pickColors() async {
+    final s = context.read<AppSettings>();
+    await showRetroDialog<void>(context, title: 'My message colours', builder: (ctx) {
+      return ListenableBuilder(
+        listenable: s,
+        builder: (ctx, _) => Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          MessageColorsEditor(settings: s),
+          const SizedBox(height: 8),
+          RetroButton(autofocus: true, onPressed: () => Navigator.pop(ctx), child: const Text('Done')),
+        ]),
+      );
+    });
+  }
+
   Future<void> _warn(String name) async {
     final anon = await showRetroDialog<bool>(context, title: 'Warn $name', builder: (ctx) {
       return Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
@@ -300,19 +358,24 @@ class _ChatPaneState extends State<ChatPane> {
     final pending = l.pendingId == null ? null : app.pending(l.pendingId!);
     final mine = l.mine;
     final time = TimeOfDay.fromDateTime(l.time).format(context);
+    final settings = context.read<AppSettings>();
+    final useColors = mine || settings.showTheirColors;
+    final bg = Color((useColors ? l.bg : null) ?? (mine ? 0xFFD6E4FF : 0xFFF4F4F4));
+    final fg = Color((useColors ? l.fg : null) ?? (isDark(bg) ? 0xFFFFFFFF : 0xFF000000));
+    final dark = isDark(bg);
+    final nameColor = mine ? (dark ? const Color(0xFFFF8A8A) : Retro.myName) : (dark ? const Color(0xFF9DBBFF) : Retro.theirName);
     final bubble = Container(
       constraints: const BoxConstraints(maxWidth: 520),
-      margin: const EdgeInsets.symmetric(vertical: 3),
+      margin: const EdgeInsets.symmetric(vertical: 3, horizontal: 6),
       padding: const EdgeInsets.fromLTRB(8, 5, 8, 6),
-      decoration: bevel(color: mine ? const Color(0xFFD6E4FF) : const Color(0xFFF4F4F4), deep: false),
+      decoration: bevel(color: bg, deep: false),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
         Text(
           '${l.from}${l.auto ? ' (Auto-response)' : ''}  $time',
-          style: TextStyle(
-              fontSize: 11, fontWeight: FontWeight.bold, color: mine ? Retro.myName : Retro.theirName),
+          style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: nameColor),
         ),
         const SizedBox(height: 2),
-        SelectableText(l.text, style: const TextStyle(fontSize: 15)),
+        SelectableText(l.text, style: TextStyle(fontSize: 15, color: fg)),
         if (pending != null) _pendingRow(app, pending),
       ]),
     );
@@ -331,7 +394,11 @@ class _ChatPaneState extends State<ChatPane> {
       padding: const EdgeInsets.only(top: 4),
       child: Wrap(crossAxisAlignment: WrapCrossAlignment.center, spacing: 6, children: [
         const Icon(Icons.schedule, size: 14, color: Retro.shadow),
-        Text(label, style: const TextStyle(fontSize: 12, fontStyle: FontStyle.italic, color: Color(0xFF404040))),
+        Container(
+          color: const Color(0xCCFFFFFF),
+          padding: const EdgeInsets.symmetric(horizontal: 3),
+          child: Text(label, style: const TextStyle(fontSize: 12, fontStyle: FontStyle.italic, color: Color(0xFF404040))),
+        ),
         if (m.status == OutboxStatus.failed)
           RetroButton(minWidth: 0, minHeight: 26, padding: const EdgeInsets.symmetric(horizontal: 8),
               onPressed: () => app.retryPending(m.id), child: const Text('Retry', style: TextStyle(fontSize: 12))),
@@ -344,3 +411,59 @@ class _ChatPaneState extends State<ChatPane> {
 }
 
 String plainAway(String? html) => htmlToText(html ?? '');
+
+/// Preview plus "Text colour" / "Background" buttons for your own messages.
+/// Used in the chat window and in Preferences.
+class MessageColorsEditor extends StatelessWidget {
+  final AppSettings settings;
+  const MessageColorsEditor({super.key, required this.settings});
+
+  @override
+  Widget build(BuildContext context) {
+    final s = settings;
+    final bg = Color(s.myBackColor ?? 0xFFD6E4FF);
+    final fg = Color(s.myTextColor ?? (isDark(bg) ? 0xFFFFFFFF : 0xFF000000));
+    return Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      Container(
+        decoration: bevel(color: bg, deep: false),
+        padding: const EdgeInsets.all(8),
+        child: Text('This is how your messages look. Buddies on AIM see these colours too.',
+            style: TextStyle(color: fg, fontSize: 15)),
+      ),
+      const SizedBox(height: 6),
+      Row(children: [
+        Expanded(
+          child: RetroButton(
+            onPressed: () async {
+              final c = await pickColor(context, title: 'Text colour', current: s.myTextColor);
+              if (c != null) s.myTextColor = c == -1 ? null : c;
+            },
+            child: Row(mainAxisSize: MainAxisSize.min, children: [
+              Container(width: 14, height: 14, color: fg),
+              const SizedBox(width: 6),
+              const Text('Text colour'),
+            ]),
+          ),
+        ),
+        const SizedBox(width: 6),
+        Expanded(
+          child: RetroButton(
+            onPressed: () async {
+              final c = await pickColor(context, title: 'Background colour', current: s.myBackColor);
+              if (c != null) s.myBackColor = c == -1 ? null : c;
+            },
+            child: Row(mainAxisSize: MainAxisSize.min, children: [
+              Container(width: 14, height: 14, decoration: BoxDecoration(color: bg, border: Border.all())),
+              const SizedBox(width: 6),
+              const Text('Background'),
+            ]),
+          ),
+        ),
+      ]),
+      RetroCheckbox(
+          value: s.showTheirColors,
+          label: "Show the colours my buddies picked",
+          onChanged: (v) => s.showTheirColors = v),
+    ]);
+  }
+}

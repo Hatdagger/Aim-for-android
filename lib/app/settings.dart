@@ -186,12 +186,80 @@ class AppSettings extends ChangeNotifier {
   bool get t9Predictive => _p.getBool('t9Predictive') ?? true;
   set t9Predictive(bool v) => _set('t9Predictive', v);
 
+  /// The keyboard's number pad types like a phone keypad (by position).
+  bool get numpadT9 => _p.getBool('numpadT9') ?? true;
+  set numpadT9(bool v) => _set('numpadT9', v);
+
   /// Buzz on each on-screen key press (phone vibration, controller rumble).
   bool get keyFeedback => _p.getBool('keyFeedback') ?? true;
   set keyFeedback(bool v) => _set('keyFeedback', v);
 
-  String get phoneStyle => _p.getString('phoneStyle') ?? 'candybar';
+  /// Cartoon phone look: brick, ice, nightglow, clamshell, girlypop, gyaru.
+  /// Older builds stored candybar/flip/slider; those map to the new looks.
+  String get phoneStyle {
+    final v = _p.getString('phoneStyle') ?? 'brick';
+    return const {'candybar': 'brick', 'flip': 'clamshell', 'slider': 'nightglow'}[v] ?? v;
+  }
+
   set phoneStyle(String v) => _set('phoneStyle', v);
+
+  /// 't9' = phone keypad, 'qwerty' = sideways slider with a full keyboard.
+  String get keyboardKind => _p.getString('keyboardKind') ?? 't9';
+  set keyboardKind(String v) => _set('keyboardKind', v);
+
+  /// Phone placement in landscape, per keyboard kind: centre as a fraction
+  /// of the free space (0 = left/top, 1 = right/bottom) and width as a
+  /// fraction of the screen width.
+  double oskX(String kind) => _p.getDouble('oskX:$kind') ?? 1.0;
+  double oskY(String kind) => _p.getDouble('oskY:$kind') ?? 0.5;
+  double oskWidth(String kind) => _p.getDouble('oskW:$kind') ?? (kind == 'qwerty' ? 0.5 : 1 / 3);
+
+  static const oskMinWidth = 0.18;
+  static const oskMaxWidth = 0.62;
+
+  void setOskPlacement(String kind, {double? x, double? y, double? width}) {
+    if (x != null) _p.setDouble('oskX:$kind', x.clamp(0.0, 1.0));
+    if (y != null) _p.setDouble('oskY:$kind', y.clamp(0.0, 1.0));
+    if (width != null) _p.setDouble('oskW:$kind', width.clamp(oskMinWidth, oskMaxWidth));
+    notifyListeners();
+  }
+
+  void resetOskPlacement() {
+    for (final k in ['t9', 'qwerty']) {
+      _p.remove('oskX:$k');
+      _p.remove('oskY:$k');
+      _p.remove('oskW:$k');
+    }
+    notifyListeners();
+  }
+
+  /// Asked Android once to let AIM run in the background (battery exemption).
+  bool get askedBackground => _p.getBool('askedBg') ?? false;
+  set askedBackground(bool v) => _set('askedBg', v);
+
+  // ------------------------------------------------------------ look
+  /// Your message colours (ARGB), sent to buddies like AIM did. null = default.
+  int? get myTextColor => _p.getInt('myFg');
+  set myTextColor(int? v) => v == null ? _remove('myFg') : _set('myFg', v);
+  int? get myBackColor => _p.getInt('myBg');
+  set myBackColor(int? v) => v == null ? _remove('myBg') : _set('myBg', v);
+
+  /// Show the colours other people picked for their messages.
+  bool get showTheirColors => _p.getBool('theirColors') ?? true;
+  set showTheirColors(bool v) => _set('theirColors', v);
+
+  /// Chat wallpaper, only visible on this device. '' = none,
+  /// 'builtin:<name>' or 'file:<path>'. Per buddy, falling back to the default.
+  String get defaultWallpaper => _p.getString('wall:*') ?? '';
+  set defaultWallpaper(String v) => _set('wall:*', v);
+  String? wallpaperOverride(String sn) => _p.getString('wall:${normalizeSn(sn)}');
+  String wallpaperFor(String sn) => wallpaperOverride(sn) ?? defaultWallpaper;
+  void setWallpaperFor(String sn, String? v) =>
+      v == null ? _remove('wall:${normalizeSn(sn)}') : _set('wall:${normalizeSn(sn)}', v);
+
+  /// Minutes in the background before the automatic away message goes up.
+  int get autoAwayMinutes => _p.getInt('autoAwayMin') ?? 10;
+  set autoAwayMinutes(int v) => _set('autoAwayMin', v);
 
   // ------------------------------------------------------------ helpers
   void _set(String k, Object v) {
@@ -201,6 +269,8 @@ class AppSettings extends ChangeNotifier {
       _p.setString(k, v);
     } else if (v is int) {
       _p.setInt(k, v);
+    } else if (v is double) {
+      _p.setDouble(k, v);
     }
     notifyListeners();
   }

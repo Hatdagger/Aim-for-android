@@ -9,7 +9,10 @@ import '../app/settings.dart';
 import 'retro.dart';
 import 'retro_text_field.dart';
 import 'setup_wizard.dart';
+import 'chat.dart';
+import 'phone_theme.dart';
 import 't9_phone.dart';
+import 'wallpaper.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -90,8 +93,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
               _section('Away', [
                 RetroCheckbox(
                     value: s.autoAway,
-                    label: 'Go away automatically when the app is in the background',
+                    label: 'Go away automatically when the app is closed for a while',
                     onChanged: (v) => s.autoAway = v),
+                Wrap(crossAxisAlignment: WrapCrossAlignment.center, spacing: 4, children: [
+                  const Text('After'),
+                  for (final m in const [1, 5, 10, 20, 30])
+                    RetroButton(
+                      minWidth: 0,
+                      padding: const EdgeInsets.symmetric(horizontal: 8),
+                      onPressed: () => s.autoAwayMinutes = m,
+                      child: Text('$m min',
+                          style: TextStyle(fontWeight: s.autoAwayMinutes == m ? FontWeight.bold : FontWeight.normal)),
+                    ),
+                ]),
                 const Text('Automatic away message'),
                 RetroTextField(controller: _autoAway, hint: kDefaultAutoAway, maxLines: 3, onChanged: (v) => s.autoAwayMessage = v),
               ]),
@@ -122,27 +136,89 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     ),
                 ]),
               ]),
-              _section('Phone Keypad', [
-                const Text('In controller mode, typing uses a T9 phone keypad beside the chat. '
-                    'Tap the keys or use the D-pad and A. B deletes, X space, Y next word, Select T9 on/off, Start done.'),
+              _section('Phone Keyboard', [
+                const Text('In controller mode, typing uses a cartoon phone. Tap the keys or use the D-pad and A. '
+                    'B deletes, X space, Y next word (QWERTY: shift), Select T9 on/off (QWERTY: symbols), '
+                    'Start sends. Sideways screens: RB lets you move and resize the phone with the D-pad.'),
+                const SizedBox(height: 6),
+                const Text('Keyboard'),
+                Wrap(spacing: 4, children: [
+                  for (final (id, label) in const [('t9', 'Phone keypad (T9)'), ('qwerty', 'Slide-out QWERTY')])
+                    RetroButton(
+                      minWidth: 0,
+                      onPressed: () => s.keyboardKind = id,
+                      child: Text(label,
+                          style: TextStyle(fontWeight: s.keyboardKind == id ? FontWeight.bold : FontWeight.normal)),
+                    ),
+                ]),
+                const SizedBox(height: 6),
+                const Text('Phone style'),
+                const SizedBox(height: 4),
+                Wrap(spacing: 6, runSpacing: 6, children: [
+                  for (final p in kPhoneThemes)
+                    SizedBox(
+                      width: 118,
+                      child: RetroListTile(
+                        onTap: () => s.phoneStyle = p.id,
+                        child: Container(
+                          padding: const EdgeInsets.all(4),
+                          decoration: BoxDecoration(
+                            color: s.phoneStyle == p.id ? const Color(0xFFFFFFE1) : null,
+                            border: Border.all(
+                                color: s.phoneStyle == p.id ? Retro.navy : const Color(0x00000000), width: 3),
+                          ),
+                          child: Column(children: [
+                            SizedBox(height: s.keyboardKind == 'qwerty' ? 90 : 150, child: PhonePreview(t: p, qwerty: s.keyboardKind == 'qwerty')),
+                            const SizedBox(height: 4),
+                            Text(p.name, style: TextStyle(fontWeight: s.phoneStyle == p.id ? FontWeight.bold : FontWeight.normal)),
+                            Text(p.blurb, textAlign: TextAlign.center, style: const TextStyle(fontSize: 11)),
+                          ]),
+                        ),
+                      ),
+                    ),
+                ]),
+                const SizedBox(height: 6),
                 RetroCheckbox(
                     value: s.t9Predictive,
                     label: 'Predictive text (T9): 43556 = hello',
                     onChanged: (v) => s.t9Predictive = v),
                 RetroCheckbox(
+                    value: s.numpadT9,
+                    label: 'Number pad types like a phone (T9), in every text box',
+                    onChanged: (v) => s.numpadT9 = v),
+                const Text(
+                    'Keys work by position, like a phone: the pad\'s top row 7 8 9 is ABC DEF GHI, the bottom row 1 2 3 '
+                    'is PQRS TUV WXYZ, 0 is space, . changes case, + or * picks the next word, - deletes, / turns T9 on/off.',
+                    style: TextStyle(fontSize: 12)),
+                RetroCheckbox(
                     value: s.keyFeedback,
                     label: 'Buzz when I press a key (phone vibrates; controller rumbles on Android)',
                     onChanged: (v) => s.keyFeedback = v),
+                RetroButton(
+                  onPressed: s.resetOskPlacement,
+                  child: const Text('Put the phone back in its usual spot and size'),
+                ),
+              ]),
+              _section('Message Look', [
+                MessageColorsEditor(settings: s),
+                const SizedBox(height: 6),
+                const Text('Default chat wallpaper (only you see it; each chat can have its own from its title bar)'),
                 const SizedBox(height: 4),
-                const Text('Phone style'),
-                Wrap(spacing: 4, runSpacing: 4, children: [
-                  for (final p in kPhoneStyles)
-                    RetroButton(
-                      minWidth: 0,
-                      onPressed: () => s.phoneStyle = p.id,
-                      child: Text(p.name,
-                          style: TextStyle(fontWeight: s.phoneStyle == p.id ? FontWeight.bold : FontWeight.normal)),
-                    ),
+                Row(children: [
+                  Container(
+                    width: 90,
+                    height: 50,
+                    decoration: BoxDecoration(color: Colors.white, border: Border.all(color: Retro.shadow)),
+                    child: ClipRect(child: ChatWallpaper(spec: s.defaultWallpaper)),
+                  ),
+                  const SizedBox(width: 8),
+                  RetroButton(
+                    onPressed: () async {
+                      final r = await pickWallpaper(context, current: s.defaultWallpaper);
+                      if (r != null && r != '*') s.defaultWallpaper = r;
+                    },
+                    child: const Text('Choose…'),
+                  ),
                 ]),
               ]),
               _section('Server', [
@@ -159,6 +235,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   RetroButton(onPressed: PlatformBridge.requestNotificationPermission, child: const Text('Allow notifications')),
                   const SizedBox(height: 4),
                   RetroButton(onPressed: PlatformBridge.requestBackgroundRunning, child: const Text('Allow background running')),
+                  const SizedBox(height: 4),
+                  const Text('Staying signed on with the screen off: tap "Allow background running" and choose Allow. '
+                      'Some tablets (Lenovo, Xiaomi, Samsung…) also have their own switch: open Android Settings > Apps > AIM > '
+                      'Battery and pick "No restrictions" / "Allow background activity". AIM keeps a small '
+                      '"Signed on" notification while it is connected; swiping AIM away no longer signs you off — use Sign Off.',
+                      style: TextStyle(fontSize: 12)),
                 ]),
               _section('Saved Screen Names', [
                 for (final a in s.accounts)

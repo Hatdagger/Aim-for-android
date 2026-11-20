@@ -12,13 +12,26 @@ class ChatLine {
   final bool mine;
   final bool auto;
 
+  /// Colours the sender picked (ARGB), or null for the default look.
+  final int? fg;
+  final int? bg;
+
   /// Outbox id while the message is still pending, otherwise null.
   String? pendingId;
 
-  ChatLine(this.from, this.text, this.time, {required this.mine, this.auto = false, this.pendingId});
+  ChatLine(this.from, this.text, this.time,
+      {required this.mine, this.auto = false, this.pendingId, this.fg, this.bg});
 
   Map<String, dynamic> toJson() =>
-      {'f': from, 't': text, 'at': time.millisecondsSinceEpoch, 'm': mine, if (auto) 'a': true};
+      {
+        'f': from,
+        't': text,
+        'at': time.millisecondsSinceEpoch,
+        'm': mine,
+        if (auto) 'a': true,
+        if (fg != null) 'fg': fg,
+        if (bg != null) 'bg': bg,
+      };
 
   static ChatLine fromJson(Map<String, dynamic> j) => ChatLine(
         j['f'] as String,
@@ -26,6 +39,8 @@ class ChatLine {
         DateTime.fromMillisecondsSinceEpoch(j['at'] as int),
         mine: j['m'] as bool,
         auto: j['a'] as bool? ?? false,
+        fg: j['fg'] as int?,
+        bg: j['bg'] as int?,
       );
 }
 

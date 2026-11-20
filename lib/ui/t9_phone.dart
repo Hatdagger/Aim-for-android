@@ -1,95 +1,27 @@
+import 'dart:math';
+
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../app/input_mode.dart';
+import '../app/numpad_t9.dart';
 import '../app/platform_bridge.dart';
 import '../app/settings.dart';
 import '../app/t9.dart';
+import 'phone_art.dart';
+import 'phone_theme.dart';
 import 'retro.dart';
 
-/// Original early-2000s phone looks for the keypad (no real brands).
-class PhoneStyle {
-  final String id;
-  final String name;
-  final List<Color> body;
-  final Color screen;
-  final Color screenInk;
-  final Color key;
-  final Color keyInk;
-  final Color accent;
-  final double radius;
-  final bool antenna;
-  final bool flip;
-  final bool slider;
-  const PhoneStyle({
-    required this.id,
-    required this.name,
-    required this.body,
-    required this.screen,
-    required this.screenInk,
-    required this.key,
-    required this.keyInk,
-    required this.accent,
-    this.radius = 36,
-    this.antenna = false,
-    this.flip = false,
-    this.slider = false,
-  });
+/// A recent chat line shown on the phone's little screen.
+class OskLine {
+  final String who;
+  final String text;
+  final bool mine;
+  const OskLine(this.who, this.text, this.mine);
 }
 
-const kPhoneStyles = [
-  PhoneStyle(
-    id: 'candybar',
-    name: 'Candy Bar',
-    body: [Color(0xFF2A4C9C), Color(0xFF15275A)],
-    screen: Color(0xFF9BBC0F),
-    screenInk: Color(0xFF0F380F),
-    key: Color(0xFFE8ECF4),
-    keyInk: Color(0xFF15275A),
-    accent: Color(0xFFB0C4FF),
-    radius: 44,
-  ),
-  PhoneStyle(
-    id: 'flip',
-    name: 'Flip',
-    body: [Color(0xFFD9DCE1), Color(0xFF8E949C)],
-    screen: Color(0xFFBFE3FF),
-    screenInk: Color(0xFF0A2A4A),
-    key: Color(0xFF3B3F45),
-    keyInk: Color(0xFF7FD4FF),
-    accent: Color(0xFF5A6068),
-    radius: 28,
-    flip: true,
-  ),
-  PhoneStyle(
-    id: 'slider',
-    name: 'Slider',
-    body: [Color(0xFF2B2B2B), Color(0xFF050505)],
-    screen: Color(0xFFFFB347),
-    screenInk: Color(0xFF3A1A00),
-    key: Color(0xFF1C1C1C),
-    keyInk: Color(0xFFFF9A1F),
-    accent: Color(0xFFC0C0C0),
-    radius: 18,
-    slider: true,
-  ),
-  PhoneStyle(
-    id: 'brick',
-    name: 'Brick',
-    body: [Color(0xFF6E7468), Color(0xFF3E423A)],
-    screen: Color(0xFF8FB08A),
-    screenInk: Color(0xFF162414),
-    key: Color(0xFFD8D2C0),
-    keyInk: Color(0xFF2A2A2A),
-    accent: Color(0xFFE05A3A),
-    radius: 14,
-    antenna: true,
-  ),
-];
-
-PhoneStyle phoneStyleById(String id) => kPhoneStyles.firstWhere((s) => s.id == id, orElse: () => kPhoneStyles.first);
-
-/// Session the keypad is editing.
+/// Session the phone is editing.
 class OskRequest {
   final TextEditingController controller;
   final String title;
@@ -97,11 +29,23 @@ class OskRequest {
   final String doneLabel;
   final VoidCallback? onDone;
   final FocusNode? returnFocus;
-  OskRequest(this.controller, this.title, this.obscure, this.doneLabel, this.onDone, this.returnFocus);
+  final List<OskLine> Function()? preview;
+  final Listenable? previewListen;
+  OskRequest(this.controller, this.title, this.obscure, this.doneLabel, this.onDone, this.returnFocus,
+      {this.preview, this.previewListen});
 }
 
 class OskController extends ChangeNotifier {
   OskRequest? current;
+
+  /// Set by the host: true when the phone sits beside the app (landscape).
+  bool wide = false;
+
+  /// Controller "move and resize" mode (RB), landscape only.
+  bool arranging = false;
+
+  /// Set by the open phone so the keyboard's number pad presses its keys.
+  void Function(String key)? numpadSink;
 
   void open({
     required TextEditingController controller,
@@ -109,14 +53,18 @@ class OskController extends ChangeNotifier {
     bool obscure = false,
     String doneLabel = 'Done',
     VoidCallback? onDone,
+    List<OskLine> Function()? preview,
+    Listenable? previewListen,
   }) {
-    current = OskRequest(controller, title, obscure, doneLabel, onDone, FocusManager.instance.primaryFocus);
+    current = OskRequest(controller, title, obscure, doneLabel, onDone, FocusManager.instance.primaryFocus,
+        preview: preview, previewListen: previewListen);
     notifyListeners();
   }
 
   void close({bool submitted = false}) {
     final r = current;
     current = null;
+    arranging = false;
     notifyListeners();
     if (r == null) return;
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -125,65 +73,322 @@ class OskController extends ChangeNotifier {
       if (submitted) r.onDone?.call();
     });
   }
+
+  void toggleArrange() {
+    arranging = wide && !arranging;
+    notifyListeners();
+  }
+
+  /// D-pad moves the phone, X shrinks, Y grows, A/B/RB/Start finish.
+  bool arrangePad(PadAction a, AppSettings s) {
+    final k = s.keyboardKind;
+    switch (a) {
+      case PadAction.up:
+        s.setOskPlacement(k, y: s.oskY(k) - 0.1);
+      case PadAction.down:
+        s.setOskPlacement(k, y: s.oskY(k) + 0.1);
+      case PadAction.left:
+        s.setOskPlacement(k, x: s.oskX(k) - 0.1);
+      case PadAction.right:
+        s.setOskPlacement(k, x: s.oskX(k) + 0.1);
+      case PadAction.x:
+        s.setOskPlacement(k, width: s.oskWidth(k) - 0.04);
+      case PadAction.y:
+        s.setOskPlacement(k, width: s.oskWidth(k) + 0.04);
+      default:
+        arranging = false;
+        notifyListeners();
+    }
+    return true;
+  }
 }
 
-/// Wraps the whole app: docks the phone beside the content (landscape) or
-/// below it (portrait) so it never covers the conversation.
-class OskHost extends StatelessWidget {
+/// Wraps the whole app and shows the cartoon phone while typing.
+///
+/// Portrait: the phone slides up over a dimmed screen (its little screen shows
+/// the conversation). Landscape: the phone sits beside the app, which shrinks
+/// to fit the space left over. There the phone can be dragged anywhere,
+/// pinched or dragged by its corner to resize, or arranged with a controller.
+class OskHost extends StatefulWidget {
   final Widget child;
   const OskHost({super.key, required this.child});
 
   @override
+  State<OskHost> createState() => _OskHostState();
+}
+
+class _OskHostState extends State<OskHost> {
+  // Live values while a finger/mouse is moving the phone (saved when it lets go).
+  double? _x, _y, _w;
+  double _startW = 0;
+
+  static const _bar = 34.0;
+
+  @override
   Widget build(BuildContext context) {
-    final req = context.watch<OskController>().current;
-    if (req == null) return child;
+    final osk = context.watch<OskController>();
+    final s = context.watch<AppSettings>();
+    final req = osk.current;
     return LayoutBuilder(builder: (ctx, c) {
-      final landscape = c.maxWidth > c.maxHeight * 1.05;
-      final phone = Material(
-        color: Retro.desktop,
-        child: SafeArea(child: T9Phone(key: ValueKey(req), request: req, compact: !landscape)),
-      );
-      if (landscape) {
-        return Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-          Expanded(child: child),
-          SizedBox(width: (c.maxWidth * 0.36).clamp(250.0, 330.0).toDouble(), child: phone),
+      final W = c.maxWidth, H = c.maxHeight;
+      final landscape = W > H * 1.05;
+      osk.wide = landscape;
+      if (req == null) {
+        return Stack(children: [Positioned.fill(child: widget.child)]);
+      }
+      final kind = s.keyboardKind;
+      final qwerty = kind == 'qwerty';
+      final theme = phoneThemeById(s.phoneStyle);
+      final art = PhoneArt.sizeFor(theme, qwerty);
+      final aspect = art.width / art.height;
+      final phone = CartoonPhone(key: ValueKey(req), request: req, theme: theme, qwerty: qwerty);
+
+      if (!landscape) {
+        var w = qwerty ? W : min(W * 0.98, H * 0.66 * aspect);
+        var h = w / aspect;
+        if (h > H * 0.72) {
+          h = H * 0.72;
+          w = h * aspect;
+        }
+        return Stack(children: [
+          Positioned.fill(child: widget.child),
+          Positioned.fill(
+            child: GestureDetector(
+              onTap: () => osk.close(),
+              child: const ColoredBox(color: Color(0x66000000)),
+            ),
+          ),
+          Positioned(left: (W - w) / 2, width: w, bottom: 0, height: h, child: SafeArea(top: false, child: phone)),
         ]);
       }
-      return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        Expanded(child: child),
-        SizedBox(height: (c.maxHeight * 0.42).clamp(200.0, 290.0).toDouble(), child: phone),
+
+      // ---------------------------------------------------- landscape
+      final x = _x ?? s.oskX(kind), y = _y ?? s.oskY(kind);
+      final wf = (_w ?? s.oskWidth(kind)).clamp(AppSettings.oskMinWidth, AppSettings.oskMaxWidth);
+      var w = wf * W;
+      var h = w / aspect + _bar;
+      if (h > H) {
+        h = H;
+        w = (H - _bar) * aspect;
+      }
+      final freeX = max(1.0, W - w), freeY = max(1.0, H - h);
+      final left = freeX * x, top = freeY * y;
+      final leftSpace = left, rightSpace = W - left - w;
+      final contentRect = leftSpace >= rightSpace
+          ? Rect.fromLTWH(0, 0, max(leftSpace, 120), H)
+          : Rect.fromLTWH(left + w, 0, max(rightSpace, 120), H);
+      final onRight = left + w / 2 > W / 2;
+
+      void move(Offset d) => setState(() {
+            _x = ((_x ?? x) + d.dx / freeX).clamp(0.0, 1.0);
+            _y = ((_y ?? y) + d.dy / freeY).clamp(0.0, 1.0);
+          });
+      void resize(double newWf) =>
+          setState(() => _w = newWf.clamp(AppSettings.oskMinWidth, AppSettings.oskMaxWidth));
+      void save() {
+        s.setOskPlacement(kind, x: _x, y: _y, width: _w);
+        setState(() => _x = _y = _w = null);
+      }
+
+      return Stack(children: [
+        const Positioned.fill(child: ColoredBox(color: Retro.desktop)),
+        Positioned.fromRect(rect: contentRect, child: widget.child),
+        Positioned(
+          left: left,
+          top: top,
+          width: w,
+          height: h,
+          child: Stack(clipBehavior: Clip.none, children: [
+            Column(children: [
+              _ArrangeBar(
+                height: _bar,
+                arranging: osk.arranging,
+                onMove: move,
+                onMoveEnd: save,
+                onSmaller: () => s.setOskPlacement(kind, width: wf - 0.04),
+                onBigger: () => s.setOskPlacement(kind, width: wf + 0.04),
+                onDock: () => s.setOskPlacement(kind, x: 1.0, y: 0.5, width: qwerty ? 0.5 : 1 / 3),
+                onWheel: (dy) {
+                  resize((_w ?? wf) - dy * 0.0006);
+                  save();
+                },
+              ),
+              Expanded(
+                child: GestureDetector(
+                  // One finger drags the phone, two fingers pinch to resize.
+                  onScaleStart: (_) => _startW = wf,
+                  onScaleUpdate: (d) {
+                    if (d.pointerCount >= 2) resize(_startW * d.scale);
+                    move(d.focalPointDelta);
+                  },
+                  onScaleEnd: (_) => save(),
+                  child: phone,
+                ),
+              ),
+            ]),
+            // Corner grip: drag outwards to grow, inwards to shrink.
+            Positioned(
+              left: onRight ? -6 : null,
+              right: onRight ? null : -6,
+              bottom: -6,
+              child: GestureDetector(
+                onPanStart: (_) => _startW = wf,
+                onPanUpdate: (d) {
+                  final dx = onRight ? -d.delta.dx : d.delta.dx;
+                  resize((_w ?? wf) + (dx + d.delta.dy * 0.5) / W);
+                },
+                onPanEnd: (_) => save(),
+                child: MouseRegion(
+                  cursor: onRight ? SystemMouseCursors.resizeDownLeft : SystemMouseCursors.resizeDownRight,
+                  child: Container(
+                    width: 30,
+                    height: 30,
+                    decoration: BoxDecoration(
+                      color: const Color(0xCC000000),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: Colors.white, width: 2),
+                    ),
+                    child: Icon(onRight ? Icons.south_west : Icons.south_east, size: 18, color: Colors.white),
+                  ),
+                ),
+              ),
+            ),
+          ]),
+        ),
       ]);
     });
   }
 }
 
-class T9Phone extends StatefulWidget {
-  final OskRequest request;
-  final bool compact;
-  const T9Phone({super.key, required this.request, this.compact = false});
+class _ArrangeBar extends StatelessWidget {
+  final double height;
+  final bool arranging;
+  final void Function(Offset) onMove;
+  final VoidCallback onMoveEnd, onSmaller, onBigger, onDock;
+  final void Function(double dy) onWheel;
+  const _ArrangeBar({
+    required this.height,
+    required this.arranging,
+    required this.onMove,
+    required this.onMoveEnd,
+    required this.onSmaller,
+    required this.onBigger,
+    required this.onDock,
+    required this.onWheel,
+  });
+
+  Widget _btn(IconData i, String tip, VoidCallback onTap) => Tooltip(
+        message: tip,
+        child: InkResponse(
+          onTap: onTap,
+          radius: 18,
+          child: Padding(padding: const EdgeInsets.symmetric(horizontal: 6), child: Icon(i, color: Colors.white, size: 20)),
+        ),
+      );
 
   @override
-  State<T9Phone> createState() => _T9PhoneState();
+  Widget build(BuildContext context) {
+    return Listener(
+      onPointerSignal: (e) {
+        if (e is PointerScrollEvent) onWheel(e.scrollDelta.dy);
+      },
+      child: Container(
+        height: height,
+        margin: const EdgeInsets.only(bottom: 2),
+        decoration: BoxDecoration(
+          color: arranging ? const Color(0xEE1F4FBF) : const Color(0xAA000000),
+          borderRadius: BorderRadius.circular(height / 2),
+          border: arranging ? Border.all(color: const Color(0xFFFFE000), width: 2) : null,
+        ),
+        child: Row(children: [
+          Expanded(
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onPanUpdate: (d) => onMove(d.delta),
+              onPanEnd: (_) => onMoveEnd(),
+              child: MouseRegion(
+                cursor: SystemMouseCursors.move,
+                child: Row(children: [
+                  const SizedBox(width: 10),
+                  const Icon(Icons.open_with, color: Colors.white, size: 18),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      arranging ? 'D-pad move · X smaller · Y bigger · A done' : 'Drag to move · pinch or corner to resize',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(color: Colors.white, fontSize: 12),
+                    ),
+                  ),
+                ]),
+              ),
+            ),
+          ),
+          _btn(Icons.remove_circle_outline, 'Smaller', onSmaller),
+          _btn(Icons.add_circle_outline, 'Bigger', onBigger),
+          _btn(Icons.vertical_align_center, 'Put back on the right', onDock),
+          const SizedBox(width: 4),
+        ]),
+      ),
+    );
+  }
 }
 
-class _T9PhoneState extends State<T9Phone> {
+/// The animated, working phone: rises in, opens (flip lid / slider screen),
+/// powers on its screen, then types into [request].
+class CartoonPhone extends StatefulWidget {
+  final OskRequest request;
+  final PhoneTheme theme;
+  final bool qwerty;
+  const CartoonPhone({super.key, required this.request, required this.theme, required this.qwerty});
+
+  @override
+  State<CartoonPhone> createState() => _CartoonPhoneState();
+}
+
+class _CartoonPhoneState extends State<CartoonPhone> with SingleTickerProviderStateMixin {
   late final T9Engine _engine;
   late final InputMode _input;
   late final AppSettings _settings;
-  final _scope = FocusScopeNode(debugLabel: 'T9 phone');
+  late final OskController _osk;
+  late final AnimationController _anim =
+      AnimationController(vsync: this, duration: const Duration(milliseconds: 1500));
+  final _scope = FocusScopeNode(debugLabel: 'Phone keyboard');
+  bool _shift = false, _sym = false, _leaving = false;
+  static final _never = ValueNotifier<int>(0);
+
+  TextEditingController get _c => widget.request.controller;
+  late final NumpadT9 _numpadT9;
+
+  /// A number-pad key (already mapped by position to a phone key).
+  void _numpad(String key) {
+    _click();
+    if (key == 'send') {
+      _leave(true);
+    } else if (key == 'del') {
+      _backspace();
+    } else if (key == 'mode') {
+      widget.qwerty ? _numpadT9.typeInto(_c, widget.request.obscure, 'mode') : _togglePredictive();
+    } else if (widget.qwerty) {
+      _numpadT9.typeInto(_c, widget.request.obscure, key);
+      setState(() {});
+    } else {
+      _engine.press(key);
+    }
+  }
 
   @override
   void initState() {
     super.initState();
     _settings = context.read<AppSettings>();
     _input = context.read<InputMode>();
-    final c = widget.request.controller;
+    _osk = context.read<OskController>();
     _engine = T9Engine(
-      initial: c.text,
+      initial: _c.text,
       predictive: _settings.t9Predictive && !widget.request.obscure,
       onText: (t) {
-        c.text = t;
-        c.selection = TextSelection.collapsed(offset: t.length);
+        _c.text = t;
+        _c.selection = TextSelection.collapsed(offset: t.length);
         if (mounted) setState(() {});
       },
     );
@@ -193,13 +398,18 @@ class _T9PhoneState extends State<T9Phone> {
       if (mounted) setState(() {});
     });
     _input.pushHandler(_onPad);
+    _osk.numpadSink = _numpad;
+    _numpadT9 = context.read<NumpadT9>();
+    _anim.forward();
     WidgetsBinding.instance.addPostFrameCallback((_) => _scope.requestFocus());
   }
 
   @override
   void dispose() {
     _input.removeHandler(_onPad);
+    if (_osk.numpadSink == _numpad) _osk.numpadSink = null;
     _scope.dispose();
+    _anim.dispose();
     super.dispose();
   }
 
@@ -207,254 +417,285 @@ class _T9PhoneState extends State<T9Phone> {
     if (_settings.keyFeedback) PlatformBridge.keyClick(pad: pad);
   }
 
-  bool _onPad(PadAction a) {
-    const felt = {PadAction.b, PadAction.x, PadAction.y, PadAction.select, PadAction.start, PadAction.lb};
-    if (felt.contains(a)) _click(pad: true);
-    switch (a) {
-      case PadAction.b:
-        if (widget.request.controller.text.isEmpty && !_engine.composing) {
-          _done(false);
-        } else {
-          _engine.backspace();
-        }
-        return true;
-      case PadAction.x:
-        _engine.space();
-        return true;
-      case PadAction.y:
-        _engine.nextCandidate();
-        return true;
-      case PadAction.select:
-        _togglePredictive();
-        return true;
-      case PadAction.start:
-        _done(true);
-        return true;
-      case PadAction.lb:
-        _engine.press('#');
-        return true;
+  // ------------------------------------------------------------ typing
+
+  void _setText(String t) {
+    _c.text = t;
+    _c.selection = TextSelection.collapsed(offset: t.length);
+    setState(() {});
+  }
+
+  void _press(String k) {
+    if (!widget.qwerty) {
+      _engine.press(k);
+      return;
+    }
+    switch (k) {
+      case 'shift':
+        setState(() => _shift = !_shift);
+      case 'sym':
+        setState(() {
+          _sym = !_sym;
+          _shift = false;
+        });
+      case 'del':
+        _backspace();
+      case 'space':
+        _setText('${_c.text} ');
+      case ':)':
+        _setText('${_c.text}:) ');
       default:
-        return false;
+        final ch = _shift && !_sym ? k.toUpperCase() : k;
+        _shift = false;
+        _setText(_c.text + ch);
     }
   }
 
+  void _backspace() {
+    if (!widget.qwerty) {
+      _engine.backspace();
+      return;
+    }
+    final t = _c.text;
+    if (t.isNotEmpty) _setText(t.substring(0, t.length - 1));
+  }
+
+  bool get _empty => _c.text.isEmpty && (widget.qwerty || !_engine.composing);
+
   void _togglePredictive() {
+    if (widget.qwerty) {
+      _press('sym');
+      return;
+    }
     if (widget.request.obscure) return;
     _engine.togglePredictive();
     _settings.t9Predictive = _engine.predictive;
     setState(() {});
   }
 
-  void _done(bool submitted) {
-    _engine.finish();
-    context.read<OskController>().close(submitted: submitted);
+  Future<void> _leave(bool submitted) async {
+    if (_leaving) return;
+    _leaving = true;
+    if (!widget.qwerty) _engine.finish();
+    await _anim.animateBack(0, duration: const Duration(milliseconds: 380), curve: Curves.easeIn);
+    if (mounted) _osk.close(submitted: submitted);
   }
+
+  bool _onPad(PadAction a) {
+    if (_osk.arranging) return _osk.arrangePad(a, _settings);
+    const felt = {PadAction.b, PadAction.x, PadAction.y, PadAction.select, PadAction.start, PadAction.lb};
+    if (felt.contains(a)) _click(pad: true);
+    switch (a) {
+      case PadAction.rb:
+        _osk.toggleArrange();
+        return true;
+      case PadAction.b:
+        if (_empty) {
+          _leave(false);
+        } else {
+          _backspace();
+        }
+        return true;
+      case PadAction.x:
+        widget.qwerty ? _press('space') : _engine.space();
+        return true;
+      case PadAction.y:
+        widget.qwerty ? _press('shift') : _engine.nextCandidate();
+        return true;
+      case PadAction.select:
+        _togglePredictive();
+        return true;
+      case PadAction.start:
+        _leave(true);
+        return true;
+      case PadAction.lb:
+        widget.qwerty ? _press(':)') : _engine.press('#');
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  // ------------------------------------------------------------ drawing
+
+  double _seg(double v, double a, double b) => ((v - a) / (b - a)).clamp(0.0, 1.0);
 
   @override
   Widget build(BuildContext context) {
-    final style = phoneStyleById(context.watch<AppSettings>().phoneStyle);
+    final t = widget.theme;
+    final keys = PhoneKeys(
+      press: _press,
+      send: () => _leave(true),
+      end: () => _leave(false),
+      clear: _backspace,
+      mode: _togglePredictive,
+      feel: _click,
+      sendLabel: widget.request.doneLabel,
+      modeLabel: widget.request.obscure ? 'abc' : _engine.modeLabel,
+      predictive: _engine.predictive,
+      shift: _shift,
+      sym: _sym,
+    );
     return FocusScope(
       node: _scope,
-      child: LayoutBuilder(builder: (ctx, c) {
-        final keyH = widget.compact ? 40.0 : 46.0;
-        // Just the keypad for now (no phone screen, no scrolling): it shrinks
-        // to fit the space it's given instead.
-        return Center(
-          child: Padding(
-            padding: const EdgeInsets.all(6),
+      child: AnimatedBuilder(
+        animation: _anim,
+        builder: (ctx, _) {
+          final v = _anim.value;
+          final rise = Curves.easeOutBack.transform(_seg(v, 0, 0.4));
+          final springs = t.flip || widget.qwerty;
+          final open = springs ? Curves.easeInOutCubic.transform(_seg(v, 0.4, 0.66)) : 1.0;
+          final squash = springs ? 1.0 : 1 - 0.07 * sin(pi * _seg(v, 0.34, 0.56));
+          final power = _seg(v, 0.66, 0.72);
+          final splash = v < 0.95;
+          return FractionalTranslation(
+            translation: Offset(0, (1 - rise) * 1.15),
             child: FittedBox(
-              fit: BoxFit.scaleDown,
-              child: SizedBox(
-                width: widget.compact ? 420 : 300,
-                child: Container(
-                  padding: const EdgeInsets.fromLTRB(10, 10, 10, 10),
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(colors: style.body, begin: Alignment.topLeft, end: Alignment.bottomRight),
-                    borderRadius: BorderRadius.circular(14),
-                    boxShadow: const [BoxShadow(color: Color(0x66000000), blurRadius: 8, offset: Offset(2, 4))],
-                  ),
-                  child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-                    _softKeys(style),
-                    const SizedBox(height: 6),
-                    for (final row in const [
-                      ['1', '2', '3'],
-                      ['4', '5', '6'],
-                      ['7', '8', '9'],
-                      ['*', '0', '#'],
-                    ])
-                      Row(children: [for (final k in row) Expanded(child: _key(style, k, keyH))]),
-                  ]),
-                ),
+              fit: BoxFit.contain,
+              child: PhoneArt(
+                t: t,
+                qwerty: widget.qwerty,
+                open: open,
+                squash: squash,
+                power: power,
+                keys: keys,
+                screen: splash ? _Splash(t: t) : _screen(t, _seg(v, 0.95, 1)),
               ),
             ),
-          ),
-        );
-      }),
-    );
-  }
-
-  // Phone screen and style picker: kept for the keyboard rework.
-  // ignore: unused_element
-  Widget _screen(PhoneStyle s) {
-    final e = _engine;
-    final text = widget.request.obscure ? '•' * widget.request.controller.text.length : e.text;
-    final cands = e.candidates;
-    return Container(
-      height: widget.compact ? 86 : 110,
-      padding: const EdgeInsets.all(8),
-      decoration: BoxDecoration(
-        color: s.screen,
-        borderRadius: BorderRadius.circular(6),
-        border: Border.all(color: const Color(0x55000000), width: 3),
-      ),
-      child: DefaultTextStyle(
-        style: TextStyle(color: s.screenInk, fontFamily: 'monospace', fontSize: 14, fontWeight: FontWeight.w600),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-          Row(children: [
-            Expanded(child: Text(widget.request.title, overflow: TextOverflow.ellipsis)),
-            Text(e.modeLabel),
-          ]),
-          Container(height: 1, color: s.screenInk.withValues(alpha: 0.4), margin: const EdgeInsets.symmetric(vertical: 3)),
-          Expanded(
-            child: Align(
-              alignment: Alignment.bottomLeft,
-              child: Text('$text▏', maxLines: 3, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 15)),
-            ),
-          ),
-          if (e.predictive && cands.length > 1)
-            Text('${e.candidateIndex + 1}/${cands.length}  * next', style: const TextStyle(fontSize: 11)),
-        ]),
+          );
+        },
       ),
     );
   }
 
-  Widget _softKeys(PhoneStyle s) {
-    return Row(children: [
-      Expanded(child: _pill(s, 'Clear', _engine.backspace)),
-      const SizedBox(width: 6),
-      Expanded(
-        child: _pill(s, widget.request.obscure ? 'abc' : (_engine.predictive ? 'T9 on' : 'T9 off'), _togglePredictive),
-      ),
-      const SizedBox(width: 6),
-      Expanded(child: _pill(s, widget.request.doneLabel, () => _done(true))),
-    ]);
-  }
-
-  Widget _pill(PhoneStyle s, String label, VoidCallback onTap) => _PhoneButton(
-        onFeel: _click,
-        color: s.accent,
-        ink: s.body.last,
-        height: 34,
-        radius: 17,
-        onTap: onTap,
-        child: Text(label, style: TextStyle(color: s.body.last, fontWeight: FontWeight.bold, fontSize: 13)),
-      );
-
-  Widget _key(PhoneStyle s, String k, double h) {
-    final sub = switch (k) {
-      '1' => '.,?!',
-      '0' => '␣',
-      '*' => _engine.predictive ? 'next' : '',
-      '#' => 'Aa',
-      _ => (kT9Letters[k] ?? '').toUpperCase(),
-    };
-    return Padding(
-      padding: const EdgeInsets.all(3),
-      child: _PhoneButton(
-        onFeel: _click,
-        color: s.key,
-        ink: s.keyInk,
-        height: h,
-        radius: s.radius > 30 ? 14 : 8,
-        autofocus: k == '5',
-        onTap: () => _engine.press(k),
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
-          Text(k, style: TextStyle(color: s.keyInk, fontSize: 18, fontWeight: FontWeight.bold, height: 1)),
-          if (sub.isNotEmpty) Text(sub, style: TextStyle(color: s.keyInk.withValues(alpha: 0.75), fontSize: 9, height: 1.2)),
-        ]),
-      ),
-    );
-  }
-
-  // ignore: unused_element
-  Widget _styleRow() {
-    final current = context.watch<AppSettings>().phoneStyle;
-    return Wrap(alignment: WrapAlignment.center, spacing: 4, runSpacing: 4, children: [
-      for (final s in kPhoneStyles)
-        RetroButton(
-          minWidth: 0,
-          minHeight: 28,
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-          onPressed: () => _settings.phoneStyle = s.id,
-          child: Text(s.name, style: TextStyle(fontSize: 12, fontWeight: current == s.id ? FontWeight.bold : FontWeight.normal)),
+  Widget _screen(PhoneTheme t, double fade) {
+    final r = widget.request;
+    return ListenableBuilder(
+      listenable: r.previewListen ?? _never,
+      builder: (ctx, _) => Opacity(
+        opacity: fade,
+        child: MiniScreen(
+          t: t,
+          title: r.title,
+          mode: widget.qwerty ? (_sym ? 'SYM' : (_shift ? 'SHIFT' : 'abc')) : _engine.modeLabel,
+          lines: r.preview?.call() ?? const [],
+          text: r.obscure ? '•' * _c.text.length : (widget.qwerty ? _c.text : _engine.text),
+          footer: !widget.qwerty && _engine.predictive && _engine.candidates.length > 1
+              ? '${_engine.candidateIndex + 1}/${_engine.candidates.length}  * next word'
+              : 'Send ▸ green key',
         ),
-    ]);
+      ),
+    );
   }
 }
 
-/// Rounded phone key: tappable, and focusable for D-pad + A.
-class _PhoneButton extends StatefulWidget {
-  final Color color;
-  final Color ink;
-  final double height;
-  final double radius;
-  final bool autofocus;
-  final VoidCallback onTap;
-  final void Function({bool pad})? onFeel;
-  final Widget child;
-  const _PhoneButton({
-    this.onFeel,
-    required this.color,
-    required this.ink,
-    required this.height,
-    required this.radius,
-    required this.onTap,
-    required this.child,
-    this.autofocus = false,
+class _Splash extends StatelessWidget {
+  final PhoneTheme t;
+  const _Splash({required this.t});
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: FittedBox(
+        child: Text(
+          t.splash,
+          style: TextStyle(
+            color: t.screenInk,
+            fontSize: 54,
+            fontWeight: FontWeight.w800,
+            fontFamily: t.fontFamily,
+            fontStyle: t.id == 'gyaru' ? FontStyle.italic : FontStyle.normal,
+            shadows: t.glow ? [Shadow(color: t.screenInk.withValues(alpha: 0.7), blurRadius: 10)] : null,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// What the phone's little screen shows: who you're writing to, the last few
+/// messages, what you're typing, and a hint line.
+class MiniScreen extends StatelessWidget {
+  final PhoneTheme t;
+  final String title;
+  final String mode;
+  final List<OskLine> lines;
+  final String text;
+  final String footer;
+  const MiniScreen({
+    super.key,
+    required this.t,
+    required this.title,
+    required this.mode,
+    required this.lines,
+    required this.text,
+    required this.footer,
   });
 
   @override
-  State<_PhoneButton> createState() => _PhoneButtonState();
+  Widget build(BuildContext context) {
+    final fs = t.mono ? 21.0 : 17.0;
+    final glow = t.glow ? [Shadow(color: t.screenInk.withValues(alpha: 0.6), blurRadius: 6)] : null;
+    return DefaultTextStyle(
+      style: TextStyle(color: t.screenInk, fontSize: fs, fontFamily: t.fontFamily, height: 1.15, shadows: glow),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        Row(children: [
+          Expanded(
+              child: Text(title, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w800))),
+          Text(mode, style: TextStyle(color: t.screenDim, fontWeight: FontWeight.w800)),
+        ]),
+        const SizedBox(height: 4),
+        Expanded(
+          child: ClipRect(
+            child: Column(mainAxisAlignment: MainAxisAlignment.end, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+              for (final l in lines)
+                Text.rich(
+                  TextSpan(children: [
+                    TextSpan(text: '${l.who}: ', style: TextStyle(color: l.mine ? t.me : t.them, fontWeight: FontWeight.w800)),
+                    TextSpan(text: l.text),
+                  ]),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
+            ]),
+          ),
+        ),
+        Container(
+          margin: const EdgeInsets.only(top: 4),
+          padding: const EdgeInsets.only(top: 4),
+          decoration: BoxDecoration(border: Border(top: BorderSide(color: t.screenDim, width: 2))),
+          child: Text('${text.length > 120 ? '…${text.substring(text.length - 120)}' : text}_',
+              maxLines: 2, overflow: TextOverflow.ellipsis),
+        ),
+        Text(footer, style: TextStyle(color: t.screenDim, fontSize: fs * 0.72, fontWeight: FontWeight.w700)),
+      ]),
+    );
+  }
 }
 
-class _PhoneButtonState extends State<_PhoneButton> {
-  bool _focused = false;
-  bool _down = false;
+/// A still picture of a phone for the style picker.
+class PhonePreview extends StatelessWidget {
+  final PhoneTheme t;
+  final bool qwerty;
+  const PhonePreview({super.key, required this.t, required this.qwerty});
 
   @override
   Widget build(BuildContext context) {
-    return FocusableActionDetector(
-      autofocus: widget.autofocus,
-      onFocusChange: (v) => setState(() => _focused = v),
-      actions: {
-        ActivateIntent: CallbackAction<ActivateIntent>(onInvoke: (_) {
-          widget.onFeel?.call(pad: true);
-          widget.onTap();
-          return null;
-        }),
-      },
-      child: GestureDetector(
-        behavior: HitTestBehavior.opaque,
-        onTapDown: (_) {
-          widget.onFeel?.call(pad: false); // buzz the moment the key goes down
-          setState(() => _down = true);
-        },
-        onTapCancel: () => setState(() => _down = false),
-        onTapUp: (_) {
-          setState(() => _down = false);
-          widget.onTap();
-        },
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 60),
-          height: widget.height,
-          alignment: Alignment.center,
-          decoration: BoxDecoration(
-            color: _down ? Color.lerp(widget.color, Colors.black, 0.25) : widget.color,
-            borderRadius: BorderRadius.circular(widget.radius),
-            border: Border.all(color: _focused ? const Color(0xFFFFE000) : const Color(0x33000000), width: _focused ? 3 : 1),
-            boxShadow: _down ? null : const [BoxShadow(color: Color(0x55000000), offset: Offset(0, 2), blurRadius: 1)],
+    return IgnorePointer(
+      child: FittedBox(
+        fit: BoxFit.contain,
+        child: PhoneArt(
+          t: t,
+          qwerty: qwerty,
+          keys: const PhoneKeys(),
+          screen: MiniScreen(
+            t: t,
+            title: 'SkaterGrl0414',
+            mode: qwerty ? 'abc' : 'T9',
+            lines: const [OskLine('SkaterGrl', 'u coming online tonight?', false), OskLine('me', 'ya after dinner', true)],
+            text: 'bring ur A game lol',
+            footer: 'Send ▸ green key',
           ),
-          child: widget.child,
         ),
       ),
     );

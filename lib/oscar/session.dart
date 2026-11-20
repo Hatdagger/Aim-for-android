@@ -587,6 +587,117 @@ class OscarSession {
     _emit(BuddyListChanged());
   }
 
+  FeedbagItem? _groupItem(int gid) =>
+      feedbag.where((i) => i.classId == FeedbagItem.classGroup && i.groupId == gid && gid != 0).firstOrNull;
+  FeedbagItem? get _rootGroup =>
+      feedbag.where((i) => i.classId == FeedbagItem.classGroup && i.groupId == 0).firstOrNull;
+
+  /// Renames a group (its buddies stay in it).
+  Future<void> renameGroup(int gid, String name) async {
+    final g = _groupItem(gid);
+    if (g == null) throw Exception('That group no longer exists');
+    if (feedbag.any((i) => i.classId == FeedbagItem.classGroup && i.groupId != gid &&
+        i.name.toLowerCase() == name.toLowerCase())) {
+      throw Exception('You already have a group called $name');
+    }
+    final old = g.name;
+    g.name = name;
+    try {
+      await _feedbagEdit((bos) => bos.sendSnac(0x0013, 0x0009, _items([g])));
+    } catch (_) {
+      g.name = old;
+      rethrow;
+    }
+  }
+
+  /// Deletes a group. Its buddies move to [moveTo] (a group id), or are
+  /// removed with it when [moveTo] is null.
+  Future<void> removeGroup(int gid, {int? moveTo}) async {
+    final g = _groupItem(gid);
+    if (g == null) return;
+    final members = feedbag.where((i) => i.classId == FeedbagItem.classBuddy && i.groupId == gid).toList();
+    if (moveTo != null) {
+      for (final m in members) {
+        await moveBuddy(m.name, moveTo);
+      }
+    }
+    final left = feedbag.where((i) => i.classId == FeedbagItem.classBuddy && i.groupId == gid).toList();
+    final root = _rootGroup;
+    await _feedbagEdit((bos) {
+      if (left.isNotEmpty) bos.sendSnac(0x0013, 0x000a, _items(left));
+      bos.sendSnac(0x0013, 0x000a, _items([g]));
+      if (root != null) {
+        root.order = root.order.where((id) => id != gid).toList();
+        bos.sendSnac(0x0013, 0x0009, _items([root]));
+      }
+    });
+    feedbag.removeWhere((i) => left.contains(i) || identical(i, g));
+    _emit(BuddyListChanged());
+  }
+
+  /// Moves a buddy into another group (keeps its nickname and other details).
+  Future<void> moveBuddy(String sn, int toGid) async {
+    final key = normalizeSn(sn);
+    final item = feedbag.where((i) => i.classId == FeedbagItem.classBuddy && normalizeSn(i.name) == key).firstOrNull;
+    final to = _groupItem(toGid);
+    if (item == null || to == null || item.groupId == toGid) return;
+    final from = _groupItem(item.groupId);
+    final iid = _freeId((id) => feedbag.any((i) => i.groupId == toGid && i.itemId == id));
+    final moved = FeedbagItem(item.name, toGid, iid, FeedbagItem.classBuddy, item.attrs);
+    await _feedbagEdit((bos) {
+      bos.sendSnac(0x0013, 0x000a, _items([item]));
+      if (from != null) {
+        from.order = from.order.where((id) => id != item.itemId).toList();
+        bos.sendSnac(0x0013, 0x0009, _items([from]));
+      }
+      bos.sendSnac(0x0013, 0x0008, _items([moved]));
+      to.order = [...to.order, iid];
+      bos.sendSnac(0x0013, 0x0009, _items([to]));
+    });
+    feedbag
+      ..remove(item)
+      ..add(moved);
+    _emit(BuddyListChanged());
+  }
+
+  /// Moves a group up (-1) or down (+1) in the list.
+  Future<void> moveGroup(int gid, int delta) async {
+    final root = _rootGroup;
+    if (root == null) return;
+    final order = groups.map((g) => g.groupId).toList();
+    final i = order.indexOf(gid);
+    final j = i + delta;
+    if (i < 0 || j < 0 || j >= order.length) return;
+    order
+      ..removeAt(i)
+      ..insert(j, gid);
+    root.order = order;
+    await _feedbagEdit((bos) => bos.sendSnac(0x0013, 0x0009, _items([root])));
+  }
+
+  /// Moves a buddy up (-1) or down (+1) inside its group.
+  Future<void> moveBuddyWithinGroup(String sn, int delta) async {
+    final key = normalizeSn(sn);
+    final item = feedbag.where((i) => i.classId == FeedbagItem.classBuddy && normalizeSn(i.name) == key).firstOrNull;
+    if (item == null) return;
+    final g = _groupItem(item.groupId);
+    if (g == null) return;
+    final members = feedbag.where((i) => i.classId == FeedbagItem.classBuddy && i.groupId == g.groupId).toList();
+    final ord = g.order;
+    members.sort((a, b) {
+      final ia = ord.indexOf(a.itemId), ib = ord.indexOf(b.itemId);
+      return (ia < 0 ? 9999 : ia).compareTo(ib < 0 ? 9999 : ib);
+    });
+    final ids = members.map((m) => m.itemId).toList();
+    final i = ids.indexOf(item.itemId), j = i + delta;
+    if (i < 0 || j < 0 || j >= ids.length) return;
+    ids
+      ..removeAt(i)
+      ..insert(j, item.itemId);
+    g.order = ids;
+    await _feedbagEdit((bos) => bos.sendSnac(0x0013, 0x0009, _items([g])));
+  }
+
   // ---------------------------------------------------------------- block / warn
 
   bool isBlocked(String sn) {

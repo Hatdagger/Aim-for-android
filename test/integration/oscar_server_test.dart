@@ -218,4 +218,44 @@ void main() {
     await b.dispose();
     await c.dispose();
   }, skip: skip, timeout: const Timeout(Duration(minutes: 4)));
+
+  test('buddy list editing: new, rename, move, reorder and delete groups', () async {
+    final c = _client('carol');
+    c.start();
+    await _online(c, wait: const Duration(minutes: 2));
+    final s = c.session!;
+    int gid(String name) => s.groups.firstWhere((g) => g.name == name).groupId;
+    final tag = DateTime.now().millisecondsSinceEpoch % 100000;
+    final g1 = 'Friends$tag', g2 = 'School$tag', g3 = 'Pals$tag';
+
+    await s.addGroup(g1);
+    await s.addBuddy('alice', g1);
+    await s.addBuddy('bob', g1);
+    await s.addGroup(g2);
+    expect(s.groups.map((g) => g.name), containsAll([g1, g2]));
+
+    await s.moveBuddyWithinGroup('bob', -1);
+    expect(s.groups.firstWhere((g) => g.name == g1).buddies.first.toLowerCase(), 'bob');
+
+    await s.moveBuddy('alice', gid(g2));
+    expect(s.groups.firstWhere((g) => g.name == g2).buddies.map((b) => b.toLowerCase()), contains('alice'));
+    expect(s.groups.firstWhere((g) => g.name == g1).buddies.map((b) => b.toLowerCase()), isNot(contains('alice')));
+
+    await s.renameGroup(gid(g1), g3);
+    expect(s.groups.map((g) => g.name), contains(g3));
+
+    final before = s.groups.map((g) => g.groupId).toList();
+    await s.moveGroup(gid(g2), -1);
+    final after = s.groups.map((g) => g.groupId).toList();
+    expect(after.indexOf(gid(g2)), before.indexOf(gid(g2)) - 1);
+
+    // Delete one group, moving its buddy over; then delete the other with its buddies.
+    await s.removeGroup(gid(g3), moveTo: gid(g2));
+    expect(s.groups.map((g) => g.name), isNot(contains(g3)));
+    expect(s.groups.firstWhere((g) => g.name == g2).buddies.map((b) => b.toLowerCase()), containsAll(['alice', 'bob']));
+    await s.removeGroup(gid(g2));
+    expect(s.groups.map((g) => g.name), isNot(contains(g2)));
+    expect(s.isBuddy('alice'), isFalse);
+    await c.dispose();
+  }, skip: skip, timeout: const Timeout(Duration(minutes: 4)));
 }

@@ -4,7 +4,9 @@ import 'package:provider/provider.dart';
 
 import 'app/app_state.dart';
 import 'app/input_mode.dart';
+import 'app/numpad_t9.dart';
 import 'app/settings.dart';
+import 'app/updater.dart';
 import 'oscar/client.dart';
 import 'ui/home.dart';
 import 'ui/retro.dart';
@@ -19,6 +21,10 @@ Future<void> main() async {
   await settings.load();
   final input = InputMode(settings);
   final app = AppState(settings, input);
+  final updates = UpdateChecker(settings)..start();
+  final osk = OskController();
+  final numpad = NumpadT9(settings, osk);
+  HardwareKeyboard.instance.addHandler(numpad.handle);
   HardwareKeyboard.instance.addHandler(input.handleKey);
   runApp(
     MultiProvider(
@@ -26,7 +32,9 @@ Future<void> main() async {
         ChangeNotifierProvider.value(value: settings),
         ChangeNotifierProvider.value(value: input),
         ChangeNotifierProvider.value(value: app),
-        ChangeNotifierProvider(create: (_) => OskController()),
+        ChangeNotifierProvider.value(value: updates),
+        ChangeNotifierProvider.value(value: osk),
+        Provider.value(value: numpad),
       ],
       child: const AimApp(),
     ),

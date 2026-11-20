@@ -25,6 +25,10 @@ class RetroTextField extends StatelessWidget {
   final bool enterSubmits;
   final FocusNode? focusNode;
 
+  /// Recent messages to show on the phone keyboard's little screen.
+  final List<OskLine> Function()? oskPreview;
+  final Listenable? oskPreviewListen;
+
   const RetroTextField({
     super.key,
     required this.controller,
@@ -39,6 +43,8 @@ class RetroTextField extends StatelessWidget {
     this.doneLabel = 'Done',
     this.enterSubmits = false,
     this.focusNode,
+    this.oskPreview,
+    this.oskPreviewListen,
   });
 
   @override
@@ -57,6 +63,8 @@ class RetroTextField extends StatelessWidget {
               title: hint.isEmpty ? 'Type' : hint,
               obscure: obscure,
               doneLabel: doneLabel,
+              preview: oskPreview,
+              previewListen: oskPreviewListen,
               onDone: () {
                 onChanged?.call(controller.text);
                 onSubmitted?.call(controller.text);

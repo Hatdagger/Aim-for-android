@@ -44,6 +44,13 @@ class AppState extends ChangeNotifier {
   final HistoryStore history = HistoryStore();
 
   AppState(this.settings, this.input) : sounds = SoundEngine(settings) {
+    void syncStyle() {
+      OutgoingStyle.textColor = settings.myTextColor;
+      OutgoingStyle.backColor = settings.myBackColor;
+    }
+
+    syncStyle();
+    settings.addListener(syncStyle);
     inbox.incoming.listen((inv) {
       pendingInvite = inv;
       notifyListeners();
@@ -177,6 +184,8 @@ class AppState extends ChangeNotifier {
   /// Manual sign-off: ends the session, cancels pending messages and clears
   /// history. (A dropped connection is not a sign-off.)
   Future<void> signOff() async {
+    _awayTimer?.cancel();
+    _awayTimer = null;
     final c = client;
     final owner = c?.screenName;
     await c?.signOff();
@@ -225,6 +234,11 @@ class AppState extends ChangeNotifier {
         everOnline = true;
         _onlineSince = DateTime.now();
         PlatformBridge.startKeepAlive('Signed on as $myScreenName');
+        if (Platform.isAndroid && !settings.askedBackground) {
+          // First sign-on: ask Android not to put AIM to sleep in the background.
+          settings.askedBackground = true;
+          PlatformBridge.requestBackgroundRunning();
+        }
         _uploadOwnIcon();
       case LinkState.reconnecting:
         PlatformBridge.startKeepAlive('Reconnecting…');
@@ -276,7 +290,8 @@ class AppState extends ChangeNotifier {
     final first = conv.lines.isEmpty;
     conv.displayName = m.from;
     conv.typing = 0;
-    final line = ChatLine(m.from, m.text, m.time, mine: false, auto: m.autoResponse);
+    final (fg, bg) = aimHtmlColors(m.html);
+    final line = ChatLine(m.from, m.text, m.time, mine: false, auto: m.autoResponse, fg: fg, bg: bg);
     conv.lines.add(line);
     _persist(conv, line);
     final viewing = foreground && openChat == conv.key;
@@ -320,7 +335,8 @@ class AppState extends ChangeNotifier {
     if (c == null || text.trim().isEmpty) return;
     final conv = conversationFor(to);
     final m = c.send(to, text.trim());
-    conv.lines.add(ChatLine(myScreenName, text.trim(), DateTime.now(), mine: true, pendingId: m.id));
+    conv.lines.add(ChatLine(myScreenName, text.trim(), DateTime.now(),
+        mine: true, pendingId: m.id, fg: settings.myTextColor, bg: settings.myBackColor));
     notifyListeners();
   }
 
@@ -375,6 +391,24 @@ class AppState extends ChangeNotifier {
     await client?.session?.removeBuddy(sn);
     notifyListeners();
   }
+
+  // Buddy list editing. Each throws a readable message if it can't be done.
+  Future<void> _edit(Future<void> Function(OscarSession s) f) async {
+    final s = client?.session;
+    if (s == null || !s.isOnline) throw Exception('Not signed on');
+    await f(s);
+    notifyListeners();
+  }
+
+  /// Groups with their ids, in list order (for editing).
+  List<BuddyGroup> get rawGroups => client?.session?.groups ?? const [];
+
+  Future<void> addGroup(String name) => _edit((s) => s.addGroup(name));
+  Future<void> renameGroup(int gid, String name) => _edit((s) => s.renameGroup(gid, name));
+  Future<void> removeGroup(int gid, {int? moveTo}) => _edit((s) => s.removeGroup(gid, moveTo: moveTo));
+  Future<void> moveBuddy(String sn, int toGid) => _edit((s) => s.moveBuddy(sn, toGid));
+  Future<void> moveGroup(int gid, int delta) => _edit((s) => s.moveGroup(gid, delta));
+  Future<void> moveBuddyWithinGroup(String sn, int delta) => _edit((s) => s.moveBuddyWithinGroup(sn, delta));
 
   bool isBlocked(String sn) => client?.session?.isBlocked(sn) ?? false;
   bool isBuddy(String sn) => client?.session?.isBuddy(sn) ?? false;
@@ -469,10 +503,14 @@ class AppState extends ChangeNotifier {
 
   // --------------------------------------------------------------- lifecycle
 
+  Timer? _awayTimer;
+
   void setForeground(bool fg) {
     if (foreground == fg) return;
     foreground = fg;
     sounds.foreground = fg;
+    _awayTimer?.cancel();
+    _awayTimer = null;
     if (fg) {
       _backgroundUnread = 0;
       PlatformBridge.clearUnread();
@@ -480,8 +518,15 @@ class AppState extends ChangeNotifier {
       if (awayIsAuto) setAway(null);
       client?.retryNow();
     } else {
+      // Only go away once the app has stayed closed for a while (10 minutes
+      // by default), so a quick look at another app doesn't flip you away.
       if (settings.autoAway && client != null && !isAway) {
-        setAway(settings.autoAwayMessage, auto: true);
+        _awayTimer = Timer(Duration(minutes: settings.autoAwayMinutes), () {
+          _awayTimer = null;
+          if (!foreground && settings.autoAway && client != null && !isAway) {
+            setAway(settings.autoAwayMessage, auto: true);
+          }
+        });
       }
     }
     notifyListeners();

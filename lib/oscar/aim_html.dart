@@ -29,9 +29,53 @@ String escapeHtml(String text) => text
     .replaceAll('>', '&gt;')
     .replaceAll('"', '&quot;');
 
-String textToAimHtml(String text) {
+/// Colours (ARGB) put on outgoing messages, like AIM's font/background
+/// colour buttons. null = AIM's defaults (black on white).
+class OutgoingStyle {
+  static int? textColor;
+  static int? backColor;
+}
+
+String _hex(int argb) => '#${(argb & 0xFFFFFF).toRadixString(16).padLeft(6, '0')}';
+
+String textToAimHtml(String text, {int? fg, int? bg}) {
+  fg ??= OutgoingStyle.textColor;
+  bg ??= OutgoingStyle.backColor;
   final body = escapeHtml(text).replaceAll('\r\n', '\n').replaceAll('\n', '<BR>');
-  return '<HTML><BODY BGCOLOR="#ffffff"><FONT LANG="0">$body</FONT></BODY></HTML>';
+  final font = fg == null ? '<FONT LANG="0">' : '<FONT COLOR="${_hex(fg)}" LANG="0">';
+  return '<HTML><BODY BGCOLOR="${bg == null ? '#ffffff' : _hex(bg)}">$font$body</FONT></BODY></HTML>';
+}
+
+const _named = {
+  'black': 0x000000, 'white': 0xffffff, 'red': 0xff0000, 'green': 0x008000, 'blue': 0x0000ff,
+  'yellow': 0xffff00, 'purple': 0x800080, 'orange': 0xffa500, 'pink': 0xffc0cb, 'gray': 0x808080,
+  'grey': 0x808080, 'navy': 0x000080, 'maroon': 0x800000, 'teal': 0x008080, 'lime': 0x00ff00,
+  'aqua': 0x00ffff, 'cyan': 0x00ffff, 'fuchsia': 0xff00ff, 'magenta': 0xff00ff, 'silver': 0xc0c0c0,
+  'olive': 0x808000,
+};
+
+int? _parseColor(String? v) {
+  if (v == null) return null;
+  var t = v.trim().toLowerCase().replaceAll('"', '').replaceAll("'", '');
+  if (_named.containsKey(t)) return 0xFF000000 | _named[t]!;
+  if (t.startsWith('#')) t = t.substring(1);
+  if (t.length == 3) t = t.split('').map((c) => '$c$c').join();
+  if (t.length != 6) return null;
+  final n = int.tryParse(t, radix: 16);
+  return n == null ? null : 0xFF000000 | n;
+}
+
+/// The text and background colours a sender picked, if any.
+/// White backgrounds and black text are AIM's defaults, so they count as none.
+(int?, int?) aimHtmlColors(String html) {
+  final fg = _parseColor(RegExp(r'<font[^>]*\scolor\s*=\s*("[^"]*"|\S+?)[\s>]', caseSensitive: false)
+      .firstMatch(html)
+      ?.group(1));
+  final bg = _parseColor(
+      RegExp(r'<(?:body|font)[^>]*\s(?:bgcolor|back)\s*=\s*("[^"]*"|\S+?)[\s>]', caseSensitive: false)
+          .firstMatch(html)
+          ?.group(1));
+  return (fg == 0xFF000000 ? null : fg, bg == 0xFFFFFFFF ? null : bg);
 }
 
 bool isAscii(String s) => s.codeUnits.every((c) => c < 128);

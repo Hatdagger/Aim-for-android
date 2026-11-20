@@ -7,6 +7,7 @@ import 'retro.dart';
 import 'retro_text_field.dart';
 import 'settings_screen.dart';
 import 'sign_up.dart';
+import 'update_button.dart';
 
 class SignOnScreen extends StatefulWidget {
   const SignOnScreen({super.key});
@@ -152,6 +153,8 @@ class _SignOnScreenState extends State<SignOnScreen> {
                       onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const SettingsScreen())),
                       child: const Icon(Icons.settings),
                     ),
+                    const SizedBox(width: 6),
+                    const UpdateButton(),
                     const Spacer(),
                     if (connecting)
                       RetroButton(onPressed: () => app.signOff(), child: const Text('Cancel'))

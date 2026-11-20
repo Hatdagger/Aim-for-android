@@ -4,8 +4,10 @@ import 'package:provider/provider.dart';
 import '../app/app_state.dart';
 import '../oscar/aim_html.dart';
 import '../oscar/client.dart';
+import '../oscar/models.dart';
 import 'profile_screen.dart';
 import 'retro.dart';
+import 'update_button.dart';
 import 'retro_text_field.dart';
 import 'settings_screen.dart';
 import 'sign_up.dart';
@@ -29,6 +31,7 @@ class _BuddyListPaneState extends State<BuddyListPane> {
     final app = context.watch<AppState>();
     return RetroWindow(
       title: "${app.myScreenName}'s Buddy List",
+      titleActions: const [UpdateButton(compact: true), SizedBox(width: 4)],
       padding: const EdgeInsets.all(4),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -124,9 +127,151 @@ class _BuddyListPaneState extends State<BuddyListPane> {
       onTap: () => setState(() => collapsed ? _collapsed.remove(name) : _collapsed.add(name)),
       child: Row(children: [
         Icon(collapsed ? Icons.arrow_right : Icons.arrow_drop_down, size: 20),
-        Text(showCount ? '$name ($on/$total)' : '$name ($total)', style: const TextStyle(fontWeight: FontWeight.bold)),
+        Expanded(
+          child: Text(showCount ? '$name ($on/$total)' : '$name ($total)',
+              overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.bold)),
+        ),
+        if (showCount)
+          RetroButton(
+            minWidth: 0,
+            minHeight: 26,
+            padding: const EdgeInsets.symmetric(horizontal: 6),
+            semanticLabel: 'Edit group $name',
+            onPressed: () => _groupMenu(context.read<AppState>(), name),
+            child: const Icon(Icons.edit, size: 15),
+          ),
       ]),
     );
+  }
+
+  // ---------------------------------------------------------------- editing
+
+  Future<void> _try(String title, Future<void> Function() f) async {
+    try {
+      await f();
+    } catch (e) {
+      if (mounted) showRetroMessage(context, title, '$e'.replaceFirst('Exception: ', ''));
+    }
+  }
+
+  Future<String?> _askName(String title, String label, {String initial = ''}) {
+    final c = TextEditingController(text: initial);
+    return showRetroDialog<String>(context, title: title, builder: (ctx) {
+      return Column(crossAxisAlignment: CrossAxisAlignment.stretch, mainAxisSize: MainAxisSize.min, children: [
+        Text(label),
+        RetroTextField(controller: c, hint: label, autofocus: true, onSubmitted: (v) => Navigator.pop(ctx, v.trim())),
+        const SizedBox(height: 8),
+        Row(mainAxisAlignment: MainAxisAlignment.end, children: [
+          RetroButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          const SizedBox(width: 6),
+          RetroButton(isDefault: true, onPressed: () => Navigator.pop(ctx, c.text.trim()), child: const Text('OK')),
+        ]),
+      ]);
+    });
+  }
+
+  void _groupMenu(AppState app, String name) {
+    final g = app.rawGroups.where((g) => g.name == name).firstOrNull;
+    if (g == null) return;
+    final all = app.rawGroups;
+    final idx = all.indexWhere((x) => x.groupId == g.groupId);
+    showRetroDialog<void>(context, title: 'Group: $name', builder: (ctx) {
+      Widget b(String label, Future<void> Function() f, {bool enabled = true, bool autofocus = false}) => Padding(
+            padding: const EdgeInsets.only(bottom: 4),
+            child: RetroButton(
+              autofocus: autofocus,
+              onPressed: enabled
+                  ? () {
+                      Navigator.pop(ctx);
+                      f();
+                    }
+                  : null,
+              child: Text(label),
+            ),
+          );
+      return Column(crossAxisAlignment: CrossAxisAlignment.stretch, mainAxisSize: MainAxisSize.min, children: [
+        b('Rename group…', autofocus: true, () async {
+          final n = await _askName('Rename Group', 'New name', initial: name);
+          if (n != null && n.isNotEmpty && n != name) await _try('Rename Group', () => app.renameGroup(g.groupId, n));
+        }),
+        b('Add a buddy to this group…', () async => _addBuddyDialog(app, group0: name)),
+        b('Move group up', enabled: idx > 0, () => _try('Move Group', () => app.moveGroup(g.groupId, -1))),
+        b('Move group down', enabled: idx < all.length - 1, () => _try('Move Group', () => app.moveGroup(g.groupId, 1))),
+        b('New group…', () => _newGroup(app)),
+        b('Delete group…', () => _deleteGroup(app, g)),
+        RetroButton(onPressed: () => Navigator.pop(ctx), child: const Text('Close')),
+      ]);
+    });
+  }
+
+  Future<void> _newGroup(AppState app) async {
+    final n = await _askName('New Group', 'Group name');
+    if (n == null || n.isEmpty) return;
+    if (app.rawGroups.any((g) => g.name.toLowerCase() == n.toLowerCase())) {
+      if (mounted) showRetroMessage(context, 'New Group', 'You already have a group called $n.');
+      return;
+    }
+    await _try('New Group', () => app.addGroup(n));
+  }
+
+  Future<void> _deleteGroup(AppState app, BuddyGroup g) async {
+    final others = app.rawGroups.where((x) => x.groupId != g.groupId).toList();
+    final choice = await showRetroDialog<int>(context, title: 'Delete ${g.name}', builder: (ctx) {
+      return Column(crossAxisAlignment: CrossAxisAlignment.stretch, mainAxisSize: MainAxisSize.min, children: [
+        Text(g.buddies.isEmpty
+            ? 'Delete the empty group ${g.name}?'
+            : '${g.name} has ${g.buddies.length} buddies. Where should they go?'),
+        const SizedBox(height: 8),
+        if (g.buddies.isNotEmpty)
+          for (final o in others)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 4),
+              child: RetroButton(onPressed: () => Navigator.pop(ctx, o.groupId), child: Text('Move them to ${o.name}')),
+            ),
+        RetroButton(
+          onPressed: () => Navigator.pop(ctx, -1),
+          child: Text(g.buddies.isEmpty ? 'Delete' : 'Delete the group and remove its buddies'),
+        ),
+        const SizedBox(height: 4),
+        RetroButton(autofocus: true, onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+      ]);
+    });
+    if (choice == null) return;
+    await _try('Delete Group', () => app.removeGroup(g.groupId, moveTo: choice == -1 ? null : choice));
+  }
+
+  Future<void> _moveBuddyTo(AppState app, String sn) async {
+    final current = app.rawGroups.where((g) => g.buddies.any((b) => b.toLowerCase() == sn.toLowerCase())).firstOrNull;
+    final choice = await showRetroDialog<int>(context, title: 'Move $sn', builder: (ctx) {
+      return SingleChildScrollView(
+        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, mainAxisSize: MainAxisSize.min, children: [
+          const Text('Move to which group?'),
+          const SizedBox(height: 6),
+          for (final g in app.rawGroups)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 4),
+              child: RetroButton(
+                onPressed: g.groupId == current?.groupId ? null : () => Navigator.pop(ctx, g.groupId),
+                child: Text(g.groupId == current?.groupId ? '${g.name} (now)' : g.name),
+              ),
+            ),
+          RetroButton(onPressed: () => Navigator.pop(ctx, -1), child: const Text('New group…')),
+          const SizedBox(height: 4),
+          RetroButton(autofocus: true, onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+        ]),
+      );
+    });
+    if (choice == null) return;
+    var gid = choice;
+    if (choice == -1) {
+      final n = await _askName('New Group', 'Group name');
+      if (n == null || n.isEmpty) return;
+      await _try('New Group', () => app.addGroup(n));
+      final made = app.rawGroups.where((g) => g.name == n).firstOrNull;
+      if (made == null) return;
+      gid = made.groupId;
+    }
+    await _try('Move Buddy', () => app.moveBuddy(sn, gid));
   }
 
   Widget _buddyRow(AppState app, BuddyView b) {
@@ -154,6 +299,13 @@ class _BuddyListPaneState extends State<BuddyListPane> {
               padding: const EdgeInsets.only(left: 4),
               child: Text(_idle(b.idleMinutes), style: const TextStyle(fontSize: 12, color: Retro.shadow)),
             ),
+          IconButton(
+            tooltip: 'More for ${b.screenName}',
+            visualDensity: VisualDensity.compact,
+            iconSize: 18,
+            onPressed: () => _buddyMenu(app, b.screenName),
+            icon: const Icon(Icons.more_vert),
+          ),
         ]),
       ),
     );
@@ -209,6 +361,7 @@ class _BuddyListPaneState extends State<BuddyListPane> {
     return Wrap(spacing: 4, runSpacing: 4, alignment: WrapAlignment.center, children: [
       RetroButton(minWidth: 0, onPressed: () => _awayDialog(app), child: const Text('Away')),
       RetroButton(minWidth: 0, onPressed: () => _addBuddyDialog(app), child: const Text('Add')),
+      RetroButton(minWidth: 0, onPressed: () => _newGroup(app), child: const Text('New Group')),
       RetroButton(minWidth: 0, onPressed: () => showInviteDialog(context), child: const Text('Invite')),
       RetroButton(
         minWidth: 0,
@@ -256,6 +409,36 @@ class _BuddyListPaneState extends State<BuddyListPane> {
           },
           child: const Text('Remove from Buddy List'),
         ),
+        const SizedBox(height: 4),
+        RetroButton(
+          onPressed: () {
+            Navigator.of(ctx).pop();
+            _moveBuddyTo(app, sn);
+          },
+          child: const Text('Move to another group…'),
+        ),
+        const SizedBox(height: 4),
+        Row(children: [
+          Expanded(
+            child: RetroButton(
+              onPressed: () {
+                Navigator.of(ctx).pop();
+                _try('Move Buddy', () => app.moveBuddyWithinGroup(sn, -1));
+              },
+              child: const Text('Move up'),
+            ),
+          ),
+          const SizedBox(width: 4),
+          Expanded(
+            child: RetroButton(
+              onPressed: () {
+                Navigator.of(ctx).pop();
+                _try('Move Buddy', () => app.moveBuddyWithinGroup(sn, 1));
+              },
+              child: const Text('Move down'),
+            ),
+          ),
+        ]),
       ]);
     });
   }
@@ -295,9 +478,9 @@ class _BuddyListPaneState extends State<BuddyListPane> {
     });
   }
 
-  void _addBuddyDialog(AppState app) {
+  void _addBuddyDialog(AppState app, {String? group0}) {
     final sn = TextEditingController();
-    final group = TextEditingController(text: 'Buddies');
+    final group = TextEditingController(text: group0 ?? (app.rawGroups.firstOrNull?.name ?? 'Buddies'));
     showRetroDialog<void>(context, title: 'Add Buddy', builder: (ctx) {
       return Column(crossAxisAlignment: CrossAxisAlignment.stretch, mainAxisSize: MainAxisSize.min, children: [
         const Text('Screen name'),

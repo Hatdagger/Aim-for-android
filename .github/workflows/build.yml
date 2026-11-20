@@ -111,7 +111,7 @@ jobs:
           cache: true
       - run: flutter create --project-name aim_for_android --org com.hatdagger --platforms android .
       - run: python3 tool/setup_platforms.py
-      - run: flutter build apk --release
+      - run: flutter build apk --release --dart-define=AIM_BUILD=${{ github.run_number }} --dart-define=AIM_COMMIT=${{ github.sha }}
       - run: cp build/app/outputs/flutter-apk/app-release.apk aim-android.apk
       - uses: actions/upload-artifact@v4
         with:
@@ -133,7 +133,7 @@ jobs:
           cache: true
       - run: flutter create --project-name aim_for_android --org com.hatdagger --platforms linux .
       - run: python3 tool/setup_platforms.py
-      - run: flutter build linux --release
+      - run: flutter build linux --release --dart-define=AIM_BUILD=${{ github.run_number }} --dart-define=AIM_COMMIT=${{ github.sha }}
       - run: tar czf aim-linux.tar.gz -C build/linux/x64/release bundle
       - uses: actions/upload-artifact@v4
         with:
@@ -150,7 +150,7 @@ jobs:
           cache: true
       - run: flutter create --project-name aim_for_android --org com.hatdagger --platforms windows .
       - run: python tool/setup_platforms.py
-      - run: flutter build windows --release
+      - run: flutter build windows --release --dart-define=AIM_BUILD=${{ github.run_number }} --dart-define=AIM_COMMIT=${{ github.sha }}
       - shell: pwsh
         run: Compress-Archive -Path build/windows/x64/runner/Release/* -DestinationPath aim-windows.zip
       - uses: actions/upload-artifact@v4
@@ -172,6 +172,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
         run: |
+          # The apps compare their own build number with this file to light up the Update button.
+          printf '{"build": %s, "commit": "%s", "date": "%s"}\n' "$GITHUB_RUN_NUMBER" "$GITHUB_SHA" "$(date -u +%Y-%m-%d)" > dist/version.json
+          cat dist/version.json
           ls -la dist
           cat > notes.md <<'NOTES'
           Automatic build of the latest code.

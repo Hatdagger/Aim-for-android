@@ -17,11 +17,38 @@ import android.view.InputDevice
 import android.provider.Settings
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
+import io.flutter.embedding.engine.FlutterEngineCache
+import io.flutter.embedding.engine.dart.DartExecutor
 import io.flutter.plugin.common.MethodChannel
 
 class MainActivity : FlutterActivity() {
     private var channel: MethodChannel? = null
     private var initialLink: String? = null
+
+    /**
+     * One app engine for the whole process. By default Flutter destroys the
+     * engine (and with it the AIM connection) whenever this screen closes, e.g.
+     * on Back or when Android tidies up a backgrounded screen. Keeping it in a
+     * cache lets the connection carry on while the keep-alive service runs.
+     */
+    override fun provideFlutterEngine(context: Context): FlutterEngine {
+        FlutterEngineCache.getInstance().get(ENGINE_ID)?.let {
+            engineReused = true
+            return it
+        }
+        val engine = FlutterEngine(context.applicationContext)
+        engine.dartExecutor.executeDartEntrypoint(DartExecutor.DartEntrypoint.createDefault())
+        FlutterEngineCache.getInstance().put(ENGINE_ID, engine)
+        return engine
+    }
+
+    override fun shouldDestroyEngineWithHost(): Boolean = false
+
+    private var engineReused = false
+
+    companion object {
+        const val ENGINE_ID = "aim_main"
+    }
 
     override fun onCreate(savedInstanceState: android.os.Bundle?) {
         initialLink = intent?.dataString
@@ -38,6 +65,7 @@ class MainActivity : FlutterActivity() {
         super.configureFlutterEngine(flutterEngine)
         val ch = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "aim/platform")
         channel = ch
+        val app = applicationContext
         ch.setMethodCallHandler { call, result ->
             try {
                 when (call.method) {
@@ -47,20 +75,20 @@ class MainActivity : FlutterActivity() {
                     }
                     "startService" -> {
                         val text = call.argument<String>("text") ?: "Signed on"
-                        val i = Intent(this, AimConnectionService::class.java).putExtra("text", text)
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(i) else startService(i)
+                        val i = Intent(app, AimConnectionService::class.java).putExtra("text", text)
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) app.startForegroundService(i) else app.startService(i)
                         result.success(null)
                     }
                     "stopService" -> {
-                        stopService(Intent(this, AimConnectionService::class.java))
+                        app.stopService(Intent(app, AimConnectionService::class.java))
                         result.success(null)
                     }
                     "notifyUnread" -> {
-                        AimNotifications.showUnread(this, call.argument<Int>("count") ?: 1)
+                        AimNotifications.showUnread(app, call.argument<Int>("count") ?: 1)
                         result.success(null)
                     }
                     "clearUnread" -> {
-                        AimNotifications.clearUnread(this)
+                        AimNotifications.clearUnread(app)
                         result.success(null)
                     }
                     "requestNotificationPermission" -> {
@@ -75,6 +103,12 @@ class MainActivity : FlutterActivity() {
                         keyClick(call.argument<Boolean>("pad") ?: false)
                         result.success(null)
                     }
+                    "openUrl" -> {
+                        val url = call.argument<String>("url") ?: ""
+                        val i = Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        startActivity(i)
+                        result.success(null)
+                    }
                     "requestIgnoreBatteryOptimizations" -> {
                         requestIgnoreBattery()
                         result.success(null)
@@ -84,6 +118,12 @@ class MainActivity : FlutterActivity() {
             } catch (e: Exception) {
                 result.error("platform", e.message, null)
             }
+        }
+        // The engine was already running (screen re-opened by an invite link):
+        // it asked for the start-up link long ago, so hand this one over now.
+        if (engineReused && initialLink != null) {
+            ch.invokeMethod("link", initialLink)
+            initialLink = null
         }
     }
 

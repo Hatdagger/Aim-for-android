@@ -50,6 +50,21 @@ class PlatformBridge {
     }
   }
 
+  /// Opens a web link in the browser (downloads go to the browser too).
+  static Future<void> openUrl(String url) async {
+    try {
+      if (_android) {
+        await _ch.invokeMethod('openUrl', {'url': url});
+      } else if (Platform.isWindows) {
+        await Process.run('explorer', [url]);
+      } else if (Platform.isMacOS) {
+        await Process.run('open', [url]);
+      } else {
+        await Process.run('xdg-open', [url]);
+      }
+    } catch (_) {}
+  }
+
   static Future<void> requestNotificationPermission() async {
     if (!_android) return;
     try {

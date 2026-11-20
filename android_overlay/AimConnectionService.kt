@@ -10,12 +10,52 @@ import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
+import android.os.PowerManager
+import android.net.wifi.WifiManager
 
-/** Keeps the app process alive (and the AIM connection up) while backgrounded. */
+/**
+ * Keeps the app process alive (and the AIM connection up) while backgrounded.
+ * While signed on it also holds a partial wake lock and a Wi-Fi lock: without
+ * them the CPU sleeps when the screen goes off, the 50-second keep-alive pings
+ * stop, and the server drops the connection.
+ */
 class AimConnectionService : Service() {
+    private var wake: PowerManager.WakeLock? = null
+    private var wifi: WifiManager.WifiLock? = null
+
     override fun onBind(intent: Intent?): IBinder? = null
 
+    @Suppress("DEPRECATION")
+    private fun holdLocks() {
+        if (wake == null) {
+            val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+            wake = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "aim:connection").apply {
+                setReferenceCounted(false)
+                acquire()
+            }
+        }
+        if (wifi == null) {
+            val wm = applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
+            wifi = wm.createWifiLock(WifiManager.WIFI_MODE_FULL_HIGH_PERF, "aim:connection").apply {
+                setReferenceCounted(false)
+                acquire()
+            }
+        }
+    }
+
+    private fun releaseLocks() {
+        try { wake?.let { if (it.isHeld) it.release() } } catch (_: Exception) {}
+        try { wifi?.let { if (it.isHeld) it.release() } } catch (_: Exception) {}
+        wake = null
+        wifi = null
+    }
+
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (intent == null) {
+            // Restarted by the system after the app process died: nothing to keep alive.
+            stopSelf()
+            return START_NOT_STICKY
+        }
         val text = intent?.getStringExtra("text") ?: "Signed on"
         val n = AimNotifications.serviceNotification(this, text)
         if (Build.VERSION.SDK_INT >= 34) {
@@ -23,13 +63,17 @@ class AimConnectionService : Service() {
         } else {
             startForeground(AimNotifications.SERVICE_ID, n)
         }
-        return START_STICKY
+        try { holdLocks() } catch (_: Exception) {}
+        return START_NOT_STICKY
     }
 
-    override fun onTaskRemoved(rootIntent: Intent?) {
-        // App swiped away: the Dart side is gone, so stop advertising a connection.
-        stopSelf()
-        super.onTaskRemoved(rootIntent)
+    // Swiping the app away from Recents no longer signs you off: the app's
+    // engine lives on (see MainActivity.provideFlutterEngine) as long as this
+    // service keeps the process running. Sign Off stops it.
+
+    override fun onDestroy() {
+        releaseLocks()
+        super.onDestroy()
     }
 }
 
