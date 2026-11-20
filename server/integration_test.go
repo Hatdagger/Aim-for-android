@@ -45,7 +45,10 @@ func startTestApp(t *testing.T) (*App, string) {
 	}
 	app.NoNetworkChecks = true
 	port := freePort(t)
-	base := 20000 + (port % 20000)
+	base := freePort(t)
+	for base > 65000 || (base <= port && port <= base+3) {
+		base = freePort(t)
+	}
 	app.Settings.Update(func(s *Settings) { s.Port = port; s.InternalBase = base })
 	if err := app.Start(); err != nil {
 		t.Fatal(err)
@@ -99,7 +102,9 @@ func fullSignOn(t *testing.T, addr, sn, pw string) string {
 		seq++
 		c.Write(append(h, d...))
 	}
-	tlv := func(t uint16, v []byte) []byte { return append([]byte{byte(t >> 8), byte(t), byte(len(v) >> 8), byte(len(v))}, v...) }
+	tlv := func(t uint16, v []byte) []byte {
+		return append([]byte{byte(t >> 8), byte(t), byte(len(v) >> 8), byte(len(v))}, v...)
+	}
 	snac := func(f, s uint16, b []byte) []byte {
 		h := make([]byte, 10)
 		binary.BigEndian.PutUint16(h, f)
