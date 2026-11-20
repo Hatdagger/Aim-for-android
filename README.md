@@ -34,7 +34,9 @@ flutter build apk      # or: flutter build linux / flutter build windows
 - `lib/app/` — app state, settings, sounds, T9 engine, controller input, Android bridge.
 - `lib/ui/` — screens and retro widgets.
 - `android_overlay/` — Kotlin foreground service, notifications and link handling.
-- `docs/SERVER_SPEC.md` — the planned AIM Server app and its invite/sign-up API.
+- `server/` — the **AIM Server app** (separate download, `server-latest` release): runs Open OSCAR
+  Server with a browser control panel, one port, UPnP, invite links and sign-ups. See `server/README.md`.
+- `docs/SERVER_SPEC.md` — the server app's spec and its invite/sign-up API.
 
 The T9 word list (`assets/t9_words.txt`) is derived from SCOWL; see `assets/t9_words_LICENSE.txt`.
 AIM and AOL are trademarks of their owners; this project is not affiliated with them.

@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=AIM Server
+Comment=Run your own AIM server
+Exec=sh -c 'cd "$(dirname "%k")" && ./aim-server'
+Terminal=false
+Categories=Network;Chat;

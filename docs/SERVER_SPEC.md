@@ -3,6 +3,9 @@
 A desktop app (Windows/Linux) wrapping **Open OSCAR Server** (MIT, by mk6i) with a
 simple GUI, plus the invite/sign-up service the client talks to.
 
+Built: see `server/` (Go, standard library only). The GUI is a control panel
+served to this computer only (http://127.0.0.1:8190) and opened in the browser.
+
 ## GUI
 - Start / Stop server. Writes `settings.env`, runs the server binary, shows its log.
 - **Addresses panel**: local IP(s), public IP (from the router over UPnP, else a
@@ -28,6 +31,10 @@ The app listens on 5190 itself and routes each new connection by its first byte:
 | `0x2A` (`*`) | OSCAR FLAP | Open OSCAR Server (internal port) |
 | `0x16` | TLS ClientHello | Account API (HTTPS, below) |
 | `G`/`H`/`P` | Plain HTTP | Invite landing pages and downloads |
+| nothing for 0.8 s | OSCAR client waiting for the server's greeting | Open OSCAR Server |
+
+OSCAR connections from home-network addresses go to a listener that advertises the
+LAN address; others go to one that advertises the public address (or hostname).
 
 The TLS certificate is self-signed and generated on first run. Its SHA-256
 fingerprint (of the DER certificate, lowercase hex) goes in every invite link so

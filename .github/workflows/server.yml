@@ -1,0 +1,113 @@
+name: AIM Server app
+
+on:
+  push:
+    branches: ['**']
+    paths: ['server/**', '.github/workflows/server.yml']
+  pull_request:
+    paths: ['server/**', '.github/workflows/server.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  # Open OSCAR Server version bundled with the app (tested with this one).
+  OOS_TAG: v0.25.0
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: server
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+          cache: false
+
+      - name: Get Open OSCAR Server ${{ env.OOS_TAG }} (Linux + Windows)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -e
+          mkdir -p "$RUNNER_TEMP/oos/linux" "$RUNNER_TEMP/oos/windows"
+          cd "$RUNNER_TEMP/oos"
+          gh release view "$OOS_TAG" -R mk6i/open-oscar-server --json assets -q '.assets[].name'
+          gh release download "$OOS_TAG" -R mk6i/open-oscar-server --pattern '*linux*x86_64*' -D linux
+          gh release download "$OOS_TAG" -R mk6i/open-oscar-server --pattern '*windows*' -D windows
+          (cd linux && for f in *; do case "$f" in *.tar.gz) tar xzf "$f";; *.zip) unzip -q "$f";; esac; done)
+          (cd windows && for f in *; do case "$f" in *.tar.gz) tar xzf "$f";; *.zip) unzip -q "$f";; esac; done)
+          LBIN=$(find linux -type f -name open_oscar_server | head -1)
+          WBIN=$(find windows -type f -name open_oscar_server.exe | head -1)
+          LIC=$(find linux -type f -name LICENSE | head -1)
+          test -n "$LBIN" && test -n "$WBIN" && test -n "$LIC"
+          chmod +x "$LBIN"
+          echo "OSCAR_BIN=$RUNNER_TEMP/oos/$LBIN" >> "$GITHUB_ENV"
+          echo "OOS_WIN=$RUNNER_TEMP/oos/$WBIN" >> "$GITHUB_ENV"
+          echo "OOS_LICENSE=$RUNNER_TEMP/oos/$LIC" >> "$GITHUB_ENV"
+
+      - run: go vet ./...
+      - name: Test (unit + real Open OSCAR Server)
+        run: go test -count=1 -v ./...
+
+      - name: Build
+        run: |
+          set -e
+          V="build-$(date -u +%Y%m%d)-${GITHUB_SHA::7}"
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "-s -w -X main.version=$V" -o out/linux/aim-server .
+          CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -trimpath -ldflags "-s -w -H=windowsgui -X main.version=$V" -o out/windows/aim-server.exe .
+
+      - name: Package
+        run: |
+          set -e
+          mkdir -p "$GITHUB_WORKSPACE/dist"
+          # Windows
+          W="out/pkg/AIM Server"
+          mkdir -p "$W"
+          cp out/windows/aim-server.exe "$OOS_WIN" "$W/"
+          cp "$OOS_LICENSE" "$W/LICENSE-open-oscar-server.txt"
+          cp README-app.txt "$W/README.txt"
+          (cd out/pkg && zip -qr "$GITHUB_WORKSPACE/dist/aim-server-windows.zip" "AIM Server")
+          # Linux / Steam Deck
+          L="out/pkg/aim-server"
+          mkdir -p "$L"
+          cp out/linux/aim-server "$OSCAR_BIN" "$L/"
+          cp "$OOS_LICENSE" "$L/LICENSE-open-oscar-server.txt"
+          cp README-app.txt "$L/README.txt"
+          cp aim-server.desktop "$L/"
+          chmod +x "$L/aim-server" "$L/open_oscar_server"
+          tar czf "$GITHUB_WORKSPACE/dist/aim-server-linux.tar.gz" -C out/pkg aim-server
+          ls -la "$GITHUB_WORKSPACE/dist"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: aim-server
+          path: dist/*
+
+      - name: Publish "server-latest" release
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        working-directory: .
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          cat > notes.md <<'NOTES'
+          Automatic build of the AIM Server app (a separate app from the AIM client).
+          - Windows: aim-server-windows.zip — unzip, open the "AIM Server" folder, run aim-server.exe
+          - Linux / Steam Deck: aim-server-linux.tar.gz — extract, run aim-server/aim-server
+          The control panel opens in your web browser. Includes Open OSCAR Server (MIT licence) by mk6i.
+          NOTES
+          gh release delete server-latest -R "$REPO" --cleanup-tag -y || true
+          for attempt in 1 2 3 4; do
+            if gh release view server-latest -R "$REPO" >/dev/null 2>&1; then
+              gh release upload server-latest dist/* -R "$REPO" --clobber && exit 0
+            else
+              gh release create server-latest dist/* -R "$REPO" --target "$GITHUB_SHA" \
+                --prerelease --title "AIM Server app (latest build)" --notes-file notes.md && exit 0
+            fi
+            echo "upload failed, retrying in 15s"; sleep 15
+          done
+          exit 1

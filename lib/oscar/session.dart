@@ -191,12 +191,15 @@ class OscarSession {
   Future<(ServerConfig, Uint8List)> _authenticate() async {
     final auth = await FlapConnection.connect(server.host, server.port);
     try {
-      try {
-        await auth.expectFrame(1, timeout: const Duration(seconds: 10));
-      } on OscarTimeout {
-        // some servers wait for the client to speak first
-      }
+      // Speak first (the AIM Server app routes connections by their first
+      // byte, so this skips its short wait), then take the server's greeting.
+      final greeting = auth.expectFrame(1, timeout: const Duration(seconds: 10));
       auth.send(1, (ByteWriter()..u32(1)).toBytes());
+      try {
+        await greeting;
+      } on OscarTimeout {
+        // some servers never greet
+      }
 
       final chal = ByteWriter()
         ..tlvString(0x0001, screenName)
@@ -292,15 +295,16 @@ class OscarSession {
       if (addr.host == server.host) rethrow;
       conn = await FlapConnection.connect(server.host, addr.port);
     }
-    try {
-      await conn.expectFrame(1, timeout: const Duration(seconds: 10));
-    } on OscarTimeout {
-      // continue anyway
-    }
+    final greeting = conn.expectFrame(1, timeout: const Duration(seconds: 10));
     final hello = ByteWriter()
       ..u32(1)
       ..tlv(0x0006, cookie);
     conn.send(1, hello.toBytes());
+    try {
+      await greeting;
+    } on OscarTimeout {
+      // continue anyway
+    }
     return conn;
   }
 

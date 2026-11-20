@@ -3,7 +3,9 @@ name: Build and test
 on:
   push:
     branches: ['**']
+    paths-ignore: ['server/**', '.github/workflows/server.yml']
   pull_request:
+    paths-ignore: ['server/**', '.github/workflows/server.yml']
   workflow_dispatch:
 
 permissions:

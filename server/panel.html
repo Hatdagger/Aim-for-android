@@ -1,0 +1,248 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>AIM Server</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#008080;font:13px Tahoma,Verdana,sans-serif;color:#000;padding:12px}
+.win{max-width:980px;margin:0 auto;background:#c0c0c0;border:2px solid;border-color:#fff #404040 #404040 #fff;box-shadow:1px 1px 0 #000}
+.bar{background:linear-gradient(90deg,#000080,#1084d0);color:#fff;font-weight:bold;padding:4px 8px;display:flex;justify-content:space-between;align-items:center}
+.bar button{min-width:0;padding:0 6px;font-weight:bold}
+.tabs{display:flex;flex-wrap:wrap;padding:6px 6px 0}
+.tab{padding:5px 12px;border:2px solid;border-color:#fff #404040 transparent #fff;margin-right:2px;cursor:pointer;background:#c0c0c0;position:relative;top:2px}
+.tab.on{font-weight:bold;top:0;padding-bottom:7px;z-index:1}
+.tab .n{background:#800000;color:#fff;border-radius:8px;padding:0 5px;font-size:11px;margin-left:4px}
+.page{border:2px solid;border-color:#fff #404040 #404040 #fff;margin:0 6px 6px;padding:12px;min-height:420px}
+button,.btn{font:inherit;background:#c0c0c0;border:2px solid;border-color:#fff #404040 #404040 #fff;padding:4px 12px;cursor:pointer;min-width:72px}
+button:active{border-color:#404040 #fff #fff #404040}
+button:disabled{color:#808080}
+button.big{font-size:16px;font-weight:bold;padding:8px 22px}
+input,select{font:inherit;border:2px solid;border-color:#808080 #fff #fff #808080;padding:3px 4px;background:#fff}
+input[type=checkbox]{vertical-align:middle}
+fieldset{border:2px groove #fff;margin:0 0 12px;padding:8px 10px}
+legend{padding:0 4px}
+table{border-collapse:collapse;width:100%;background:#fff;border:2px solid;border-color:#808080 #fff #fff #808080}
+th{background:#c0c0c0;text-align:left;padding:3px 6px;border:1px solid;border-color:#fff #808080 #808080 #fff;font-weight:normal}
+td{padding:3px 6px;border-bottom:1px solid #e0e0e0;vertical-align:top}
+td button{min-width:0;padding:1px 6px;font-size:12px}
+.mono{font-family:Consolas,monospace;font-size:12px;word-break:break-all}
+.addr{font:bold 18px Consolas,monospace;background:#fff;padding:4px 8px;border:2px solid;border-color:#808080 #fff #fff #808080;display:inline-block;margin:2px 0 6px}
+.warn{background:#ffffe1;border:1px solid #000;padding:8px;margin:0 0 10px}
+.err{color:#800000;font-weight:bold}
+.ok{color:#006000;font-weight:bold}
+.muted{color:#404040;font-size:12px}
+.row{display:flex;gap:16px;flex-wrap:wrap}
+.row>*{flex:1 1 280px}
+.light{display:inline-block;width:12px;height:12px;border-radius:6px;border:1px solid #000;vertical-align:middle;margin-right:6px}
+#log{background:#000;color:#c0c0c0;font:12px Consolas,monospace;height:460px;overflow:auto;padding:6px;white-space:pre-wrap}
+ul.tree{list-style:none;padding-left:18px;margin:2px 0}
+ul.tree li:before{content:"└ ";color:#808080}
+#toast{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:#ffffe1;border:1px solid #000;padding:8px 14px;display:none;max-width:90%}
+label.f{display:block;margin:6px 0}
+label.f span{display:inline-block;min-width:220px}
+</style></head><body>
+<div class="win">
+  <div class="bar"><span>AIM Server</span><button onclick="quitApp()" title="Stop the server and close the app">✕ Quit</button></div>
+  <div class="tabs" id="tabs"></div>
+  <div class="page" id="page"></div>
+</div>
+<div id="toast"></div>
+<script>
+var TABS=[['server','Server'],['accounts','Accounts'],['online','Online'],['invites','Invites'],['review','Needs review'],['settings','Settings'],['log','Log']];
+var cur='server', status={}, timer=null;
+function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});}
+function toast(m,bad){var t=document.getElementById('toast');t.textContent=m;t.style.color=bad?'#800000':'#000';t.style.display='block';clearTimeout(t._h);t._h=setTimeout(function(){t.style.display='none';},4000);}
+function api(method,path,body){
+  return fetch('/api/'+path,{method:method,headers:{'Content-Type':'application/json','X-AIM-Panel':'1'},body:body?JSON.stringify(body):undefined})
+   .then(function(r){return r.json().then(function(j){if(!r.ok)throw new Error(j.error||('HTTP '+r.status));return j;});});
+}
+function get(p){return api('GET',p);} function post(p,b){return api('POST',p,b||{});}
+function act(p,b,msg){return post(p,b).then(function(r){if(msg)toast(msg);show(cur);return r;}).catch(function(e){toast(e.message,true);});}
+function copy(text){try{navigator.clipboard.writeText(text);toast('Copied');}catch(e){prompt('Copy this:',text);}}
+function ago(t){if(!t||t.indexOf('0001')==0)return '';var s=(Date.now()-new Date(t))/1000;if(s<60)return 'just now';if(s<3600)return Math.floor(s/60)+' min ago';if(s<86400)return Math.floor(s/3600)+' h ago';return Math.floor(s/86400)+' days ago';}
+function dur(s){s=s|0;if(s<60)return s+'s';if(s<3600)return Math.floor(s/60)+'m';return Math.floor(s/3600)+'h '+Math.floor(s%3600/60)+'m';}
+function tabs(){
+  document.getElementById('tabs').innerHTML=TABS.map(function(t){
+    var n=(t[0]=='review'&&status.review)?'<span class="n">'+status.review+'</span>':'';
+    return '<div class="tab'+(t[0]==cur?' on':'')+'" onclick="show(\''+t[0]+'\')">'+t[1]+n+'</div>';}).join('');
+}
+function show(t){cur=t;tabs();clearInterval(timer);timer=null;
+  var P=document.getElementById('page');
+  ({server:pServer,accounts:pAccounts,online:pOnline,invites:pInvites,review:pReview,settings:pSettings,log:pLog})[t](P);
+}
+function refreshStatus(){return get('status').then(function(s){status=s;tabs();return s;});}
+
+// ---------------------------------------------------------------- Server
+function pServer(P){
+  refreshStatus().then(function(s){
+    var n=s.net||{}, running=s.state=='running';
+    var light=running?'#00c000':(s.state=='stopped'?'#c00000':'#e0c000');
+    var h='<div class="row"><div>';
+    h+='<p><span class="light" style="background:'+light+'"></span><b style="font-size:16px">'+
+      ({running:'Server is running',stopped:'Server is stopped',starting:'Starting…',stopping:'Stopping…'})[s.state]+'</b></p>';
+    if(s.error)h+='<p class="err">'+esc(s.error)+'</p>';
+    h+= running?'<button class="big" onclick="act(\'stop\',null,\'Stopped\')">Stop</button>':
+                '<button class="big" '+(s.state!='stopped'?'disabled':'')+' onclick="startSrv(this)">Start</button>';
+    h+=' <button onclick="this.disabled=true;act(\'recheck\',null,\'Checked again\')">Check again</button>';
+    if(running)h+='<p>'+(s.online>=0?s.online:'?')+' online · '+s.accounts+' signed up with invites · '+s.invites+' open invites</p>';
+    h+='</div><div>';
+    h+='<fieldset><legend>People in your home (Wi-Fi / LAN) use</legend><div class="addr">'+esc(s.lan_address)+'</div>';
+    if(n.local_ips&&n.local_ips.length>1)h+='<div class="muted">This computer\'s other addresses: '+esc(n.local_ips.join(', '))+'</div>';
+    h+='</fieldset><fieldset><legend>People outside your home use</legend>';
+    var outside=s.hostname?(s.hostname+':'+s.port):s.public_address;
+    h+=outside?'<div class="addr">'+esc(outside)+'</div>':'<div class="muted">(public address not known yet)</div>';
+    h+='<div class="muted">Router port to forward: <b>TCP '+s.port+'</b> → '+esc(n.local_ip)+'. Only this one port. ';
+    h+='Router: '+({open:'<span class="ok">port opened automatically ✔</span>',failed:'<span class="err">couldn\'t open the port automatically</span>',off:'automatic opening is off',searching:'looking…','n/a':'not checked'}[n.upnp_state]||'not checked yet')+'</div>';
+    h+='</fieldset></div></div>';
+    (s.warnings||[]).forEach(function(w){h+='<div class="warn">⚠ '+esc(w)+'</div>';});
+    h+='<fieldset><legend>Getting people on</legend><ol style="margin:0;padding-left:20px;line-height:1.6">'+
+      '<li>Make your own account in <a href="#" onclick="show(\'accounts\');return false">Accounts</a>.</li>'+
+      '<li>Make an invite in <a href="#" onclick="show(\'invites\');return false">Invites</a> and send the link. A <b>household</b> invite works for several people.</li>'+
+      '<li>They open the link, download the app, and pick a screen name. Anyone on the server can invite more people from the app.</li></ol>'+
+      '<p class="muted">Invite links point to <b>'+esc(s.invite_host)+'</b>. Certificate fingerprint: <span class="mono">'+esc(s.fingerprint)+'</span></p></fieldset>';
+    h+='<p class="muted">Data folder: '+esc(s.data_dir)+'</p>';
+    P.innerHTML=h;
+  }).catch(function(e){P.innerHTML='<p class="err">'+esc(e.message)+'</p>';});
+  timer=setInterval(function(){if(cur=='server'&&document.activeElement.tagName!='INPUT')pServer(P);},5000);
+}
+function startSrv(b){b.disabled=true;b.textContent='Starting…';post('start').then(function(){toast('Server started');show('server');}).catch(function(e){toast(e.message,true);show('server');});}
+function quitApp(){if(!confirm('Stop the AIM server and close the app?'))return;post('quit').then(function(){document.body.innerHTML='<div class="win"><div class="bar">AIM Server</div><div class="page">The AIM server app has closed. Run it again to start it.</div></div>';});}
+
+// ---------------------------------------------------------------- Accounts
+function pAccounts(P){
+  P.innerHTML='Loading…';
+  get('accounts').then(function(rows){
+    var h='<fieldset><legend>Add an account</legend>Screen name <input id="an" size=16 maxlength=16> Password <input id="ap" type="password" size=16 maxlength=16> <button onclick="addAcct()">Add</button>'+
+      '<div class="muted">Screen names: 3–16 letters, numbers and spaces, starting with a letter. Passwords: 4–16 characters.</div></fieldset>';
+    h+='<table><tr><th>Screen name</th><th>Invited by</th><th>Joined</th><th>Status</th><th></th></tr>';
+    if(!rows.length)h+='<tr><td colspan=5 class="muted">No accounts yet.</td></tr>';
+    rows.forEach(function(r){
+      var st=r.suspended?'<span class="err">suspended</span>':(r.status=='review'?'<span class="err">needs review</span>':(r.online?'<span class="ok">online</span>':'offline'));
+      var sn=esc(JSON.stringify(r.screen_name));
+      h+='<tr><td><b>'+esc(r.screen_name)+'</b></td><td>'+esc(r.invited_by||'—')+'</td><td>'+ago(r.created)+'</td><td>'+st+'</td><td style="white-space:nowrap">'+
+        '<button onclick=\'resetPw('+sn+')\'>Password</button> '+
+        (r.suspended?'<button onclick=\'act("accounts/suspend",{screen_name:'+sn+',suspended:false},"Unsuspended")\'>Unsuspend</button> ':
+                     '<button onclick=\'act("accounts/suspend",{screen_name:'+sn+',suspended:true},"Suspended")\'>Suspend</button> ')+
+        (r.online?'<button onclick=\'act("accounts/kick",{screen_name:'+sn+'},"Signed off")\'>Sign off</button> ':'')+
+        '<button onclick=\'delAcct('+sn+')\'>Delete</button></td></tr>';
+    });
+    P.innerHTML=h+'</table>';
+  }).catch(function(e){P.innerHTML='<p class="err">'+esc(e.message)+'</p>';});
+}
+function addAcct(){act('accounts/add',{screen_name:document.getElementById('an').value,password:document.getElementById('ap').value},'Account added');}
+function resetPw(sn){var p=prompt('New password for '+sn+' (4–16 characters):');if(p)act('accounts/password',{screen_name:sn,password:p},'Password changed');}
+function delAcct(sn){if(confirm('Delete '+sn+'? Their buddy list and profile are lost.'))act('accounts/delete',{screen_name:sn},'Deleted');}
+
+// ---------------------------------------------------------------- Online
+function pOnline(P){
+  get('online').then(function(o){
+    var h='<table><tr><th>Screen name</th><th>Online for</th><th>Away</th><th>From</th><th>App</th></tr>';
+    if(!o.sessions.length)h+='<tr><td colspan=5 class="muted">Nobody is online.</td></tr>';
+    o.sessions.forEach(function(s){var i=(s.instances||[])[0]||{};
+      h+='<tr><td><b>'+esc(s.screen_name)+'</b></td><td>'+dur(s.online_seconds)+'</td><td>'+(s.is_away?'away':'')+(s.idle_seconds?' idle '+dur(s.idle_seconds):'')+'</td><td class="mono">'+esc(i.remote_addr||'')+'</td><td>'+esc(i.client_id||'')+'</td></tr>';});
+    h+='</table><h3>Chat rooms</h3><table><tr><th>Room</th><th>People</th></tr>';
+    if(!o.rooms.length)h+='<tr><td colspan=2 class="muted">No chat rooms.</td></tr>';
+    o.rooms.forEach(function(r){h+='<tr><td>'+esc(r.name)+'</td><td>'+esc((r.participants||[]).map(function(p){return p.screen_name;}).join(', '))+'</td></tr>';});
+    P.innerHTML=h+'</table>';
+  }).catch(function(e){P.innerHTML='<p class="err">'+esc(e.message)+'</p>';});
+  timer=setInterval(function(){if(cur=='online')pOnline(P);},8000);
+}
+
+// ---------------------------------------------------------------- Invites
+function treeHTML(nodes){if(!nodes||!nodes.length)return '';return '<ul class="tree">'+nodes.map(function(n){
+  var st=n.status&&n.status!='ok'?' <span class="err">('+esc(n.status)+')</span>':'';
+  return '<li>'+esc(n.screen_name)+st+treeHTML(n.children)+'</li>';}).join('')+'</ul>';}
+function pInvites(P){
+  get('invites').then(function(o){
+    var h='<fieldset><legend>New invite</legend>From <input id="ib" size=16 placeholder="'+esc(status.server_name||'')+'"> '+
+      '<select id="ik"><option value="single">Single (1 person, 7 days)</option><option value="household">Household (8 people, 30 days)</option></select> '+
+      '<button onclick="newInvite()">Create</button><div id="newinv"></div></fieldset>';
+    h+='<table><tr><th>Code</th><th>From</th><th>Kind</th><th>Used</th><th>Expires</th><th>State</th><th></th></tr>';
+    if(!o.invites.length)h+='<tr><td colspan=7 class="muted">No invites yet.</td></tr>';
+    o.invites.forEach(function(i){
+      h+='<tr><td class="mono"><b>'+esc(i.code)+'</b></td><td>'+esc(i.by)+'</td><td>'+esc(i.kind)+'</td><td>'+i.uses+' / '+i.max_uses+
+        (i.used_by&&i.used_by.length?'<div class="muted">'+esc(i.used_by.join(', '))+'</div>':'')+'</td><td>'+new Date(i.expires).toLocaleDateString()+'</td><td>'+esc(i.state)+'</td><td style="white-space:nowrap">'+
+        (i.active?'<button onclick=\'copy('+esc(JSON.stringify(i.link))+')\'>Copy link</button> <button onclick=\'act("invites/revoke",{code:"'+esc(i.code)+'"},"Cancelled")\'>Cancel</button>':'')+'</td></tr>';});
+    h+='</table><h3>Who invited whom</h3>'+(o.tree&&o.tree.length?treeHTML(o.tree):'<p class="muted">Nobody has joined with an invite yet.</p>');
+    P.innerHTML=h;
+  }).catch(function(e){P.innerHTML='<p class="err">'+esc(e.message)+'</p>';});
+}
+function newInvite(){post('invites/add',{by:document.getElementById('ib').value,kind:document.getElementById('ik').value}).then(function(r){
+  show('invites');setTimeout(function(){var d=document.getElementById('newinv');if(d)d.innerHTML='<p>Send this link: <span class="mono">'+esc(r.link)+'</span> <button onclick=\'copy('+esc(JSON.stringify(r.link))+')\'>Copy</button></p>';},300);
+}).catch(function(e){toast(e.message,true);});}
+
+// ---------------------------------------------------------------- Review
+function pReview(P){
+  get('review').then(function(o){
+    var h='<p class="muted">Accounts land here when many sign-ups come from one place. Flagged accounts still work; suspended ones can\'t sign on until approved.</p>';
+    h+='<table><tr><th>Screen name</th><th>Invited by</th><th>IP</th><th>Device</th><th>Why</th><th></th></tr>';
+    if(!o.accounts.length)h+='<tr><td colspan=6 class="muted">Nothing to review.</td></tr>';
+    o.accounts.forEach(function(a){var sn=esc(JSON.stringify(a.screen_name));
+      h+='<tr><td><b>'+esc(a.screen_name)+'</b><div class="muted">'+esc(a.status)+', '+ago(a.created)+'</div></td><td>'+esc(a.invited_by)+'</td><td class="mono">'+esc(a.ip)+'</td><td class="mono">'+esc((a.device||'').slice(0,10))+'</td><td>'+esc(a.reason)+'</td><td style="white-space:nowrap">'+
+      '<button onclick=\'act("review/approve",{screen_name:'+sn+'},"Approved")\'>Approve</button> '+
+      '<button onclick=\'trustBoth('+esc(JSON.stringify(a.ip))+','+esc(JSON.stringify(a.device))+')\'>Trust household</button> '+
+      '<button onclick=\'delAcct('+sn+')\'>Delete</button></td></tr>';});
+    h+='</table>';
+    h+='<h3>Banned</h3>'+marks(o.bans,'bans','Unban');
+    h+='<h3>Trusted households</h3><p class="muted">Trusted IP addresses and devices skip the sign-up limits (they still show in Who invited whom).</p>'+marks(o.trusted,'trusted','Remove');
+    h+='<fieldset><legend>Add by hand</legend><select id="ml"><option value="trusted">Trust</option><option value="bans">Ban</option></select> '+
+      '<select id="mk"><option value="ip">IP address</option><option value="device">Device id</option><option value="inviter">Inviter (screen name)</option></select> '+
+      '<input id="mv" size=24> Note <input id="mn" size=16> <button onclick="addMark()">Add</button></fieldset>';
+    P.innerHTML=h;
+  }).catch(function(e){P.innerHTML='<p class="err">'+esc(e.message)+'</p>';});
+}
+function marks(list,name,btn){var h='<table><tr><th>Kind</th><th>Value</th><th>Note</th><th>Since</th><th></th></tr>';
+  if(!list.length)h+='<tr><td colspan=5 class="muted">None.</td></tr>';
+  list.forEach(function(m){h+='<tr><td>'+esc(m.kind)+'</td><td class="mono">'+esc(m.value)+'</td><td>'+esc(m.note||'')+'</td><td>'+ago(m.at)+'</td><td><button onclick=\'act("marks/remove",{list:"'+name+'",kind:"'+esc(m.kind)+'",value:'+esc(JSON.stringify(m.value))+'},"Removed")\'>'+btn+'</button></td></tr>';});
+  return h+'</table>';}
+function addMark(){act('marks/add',{list:document.getElementById('ml').value,kind:document.getElementById('mk').value,value:document.getElementById('mv').value,note:document.getElementById('mn').value},'Added');}
+function trustBoth(ip,dev){post('marks/add',{list:'trusted',kind:'ip',value:ip,note:'trusted from review'}).then(function(){
+  return post('marks/add',{list:'trusted',kind:'device',value:dev,note:'trusted from review'});}).then(function(){toast('Trusted');show('review');}).catch(function(e){toast(e.message,true);});}
+
+// ---------------------------------------------------------------- Settings
+function pSettings(P){
+  Promise.all([get('settings'),get('clients')]).then(function(r){var s=r[0],c=r[1],l=s.limits;
+    function num(id,v){return '<input id="'+id+'" type="number" min="1" style="width:70px" value="'+v+'">';}
+    var h='<fieldset><legend>Server</legend>'+
+      '<label class="f"><span>Server name (shown on invite pages)</span><input id="s_name" size=30 value="'+esc(s.server_name)+'"></label>'+
+      '<label class="f"><span>Require passwords</span><input id="s_auth" type="checkbox"'+(s.require_passwords?' checked':'')+'> <span class="muted">Leave on. Off lets anyone sign on as anyone.</span></label>'+
+      '<label class="f"><span>Port</span>'+num('s_port',s.port)+' <span class="muted">TCP; 5190 is AIM\'s usual port</span></label>'+
+      '<label class="f"><span>Open the port on my router automatically (UPnP)</span><input id="s_upnp" type="checkbox"'+(s.upnp?' checked':'')+'></label>'+
+      '<label class="f"><span>Server address for outsiders (optional)</span><input id="s_host" size=30 placeholder="e.g. myaim.duckdns.org" value="'+esc(s.hostname)+'"></label>'+
+      '<div class="muted" style="margin-left:224px">A free dynamic DNS name keeps invite links working when your home\'s address changes. Leave empty to use your public address.</div>'+
+      '<label class="f"><span>Invite links use</span><select id="s_inv">'+
+        [['auto','Automatic (public address, or home address if outsiders can\'t reach you)'],['public','Public address'],['lan','Home network address only']].map(function(o){return '<option value="'+o[0]+'"'+(s.invite_address==o[0]?' selected':'')+'>'+o[1]+'</option>';}).join('')+'</select></label>'+
+      '<label class="f"><span>Client app builds from GitHub repo</span><input id="s_repo" size=30 value="'+esc(s.client_repo)+'"></label>'+
+      '</fieldset>';
+    h+='<fieldset><legend>Sign-up limits (per 24 hours)</legend><table style="width:auto"><tr><th>Same…</th><th>Allowed</th><th>Ban at</th></tr>'+
+      '<tr><td>IP address</td><td>'+num('l_ipa',l.ip_allow)+'</td><td>'+num('l_ipb',l.ip_ban)+'</td></tr>'+
+      '<tr><td>Device</td><td>'+num('l_da',l.device_allow)+'</td><td>'+num('l_db',l.device_ban)+'</td></tr>'+
+      '<tr><td>Inviter</td><td>'+num('l_ia',l.inviter_allow)+'</td><td>'+num('l_ib',l.inviter_ban)+'</td></tr>'+
+      '<tr><td>Any of these within 10 minutes</td><td>flag at '+num('l_bf',l.burst_flag)+'</td><td>'+num('l_bb',l.burst_ban)+'</td></tr></table>'+
+      '<div class="muted">Above "Allowed", new accounts work but appear in Needs review. At "Ban at", the sign-up is refused, the device, IP and inviter are banned, and that burst of accounts is suspended until you review it.</div>'+
+      '<label class="f"><span>Invites one person can make per day</span>'+num('l_ipd',l.invites_per_day)+'</label>'+
+      '<label class="f"><span>Single invite lasts (days)</span>'+num('l_sd',l.single_days)+'</label>'+
+      '<label class="f"><span>Household invite: people / days</span>'+num('l_hu',l.household_uses)+' / '+num('l_hd',l.household_days)+'</label></fieldset>';
+    h+='<button class="big" onclick="saveSettings()">Save</button> <span class="muted">Changing port, address, passwords or UPnP restarts the server (people reconnect by themselves).</span>';
+    h+='<fieldset style="margin-top:14px"><legend>Client app downloads (for invite pages)</legend><table><tr><th>App</th><th>Have</th><th>Status</th></tr>';
+    c.forEach(function(f){h+='<tr><td>'+esc(f.label)+'</td><td>'+(f.have?(Math.round(f.size/1048576)+' MB, '+ago(f.modified)):'<span class="err">no</span>')+'</td><td>'+esc(f.status||'')+'</td></tr>';});
+    h+='</table><p><button onclick="act(\'clients/refresh\',null,\'Downloading in the background\')">Download newest</button></p></fieldset>';
+    P.innerHTML=h;
+  }).catch(function(e){P.innerHTML='<p class="err">'+esc(e.message)+'</p>';});
+}
+function v(id){return document.getElementById(id).value;} function n(id){return parseInt(v(id),10)||0;}
+function saveSettings(){get('settings').then(function(s){
+  s.server_name=v('s_name');s.require_passwords=document.getElementById('s_auth').checked;s.port=n('s_port');
+  s.upnp=document.getElementById('s_upnp').checked;s.hostname=v('s_host');s.invite_address=v('s_inv');s.client_repo=v('s_repo');
+  var l=s.limits;l.ip_allow=n('l_ipa');l.ip_ban=n('l_ipb');l.device_allow=n('l_da');l.device_ban=n('l_db');l.inviter_allow=n('l_ia');l.inviter_ban=n('l_ib');
+  l.burst_flag=n('l_bf');l.burst_ban=n('l_bb');l.invites_per_day=n('l_ipd');l.single_days=n('l_sd');l.household_uses=n('l_hu');l.household_days=n('l_hd');
+  return post('settings',s);}).then(function(r){toast(r.restarted?'Saved — restarting the server':'Saved');show('settings');}).catch(function(e){toast(e.message,true);});}
+
+// ---------------------------------------------------------------- Log
+function pLog(P){
+  P.innerHTML='<div id="log"></div>';
+  function load(){get('log').then(function(lines){var d=document.getElementById('log');if(!d)return;var atEnd=d.scrollTop+d.clientHeight>=d.scrollHeight-20;
+    d.textContent=lines.join('\n');if(atEnd)d.scrollTop=d.scrollHeight;});}
+  load();timer=setInterval(function(){if(cur=='log')load();},3000);
+}
+show('server');
+</script></body></html>
