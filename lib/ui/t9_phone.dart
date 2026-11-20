@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../app/input_mode.dart';
+import '../app/platform_bridge.dart';
 import '../app/settings.dart';
 import '../app/t9.dart';
 import 'retro.dart';
@@ -202,7 +203,13 @@ class _T9PhoneState extends State<T9Phone> {
     super.dispose();
   }
 
+  void _click({bool pad = false}) {
+    if (_settings.keyFeedback) PlatformBridge.keyClick(pad: pad);
+  }
+
   bool _onPad(PadAction a) {
+    const felt = {PadAction.b, PadAction.x, PadAction.y, PadAction.select, PadAction.start, PadAction.lb};
+    if (felt.contains(a)) _click(pad: true);
     switch (a) {
       case PadAction.b:
         if (widget.request.controller.text.isEmpty && !_engine.composing) {
@@ -341,6 +348,7 @@ class _T9PhoneState extends State<T9Phone> {
   }
 
   Widget _pill(PhoneStyle s, String label, VoidCallback onTap) => _PhoneButton(
+        onFeel: _click,
         color: s.accent,
         ink: s.body.last,
         height: 34,
@@ -360,6 +368,7 @@ class _T9PhoneState extends State<T9Phone> {
     return Padding(
       padding: const EdgeInsets.all(3),
       child: _PhoneButton(
+        onFeel: _click,
         color: s.key,
         ink: s.keyInk,
         height: h,
@@ -397,8 +406,10 @@ class _PhoneButton extends StatefulWidget {
   final double radius;
   final bool autofocus;
   final VoidCallback onTap;
+  final void Function({bool pad})? onFeel;
   final Widget child;
   const _PhoneButton({
+    this.onFeel,
     required this.color,
     required this.ink,
     required this.height,
@@ -423,13 +434,17 @@ class _PhoneButtonState extends State<_PhoneButton> {
       onFocusChange: (v) => setState(() => _focused = v),
       actions: {
         ActivateIntent: CallbackAction<ActivateIntent>(onInvoke: (_) {
+          widget.onFeel?.call(pad: true);
           widget.onTap();
           return null;
         }),
       },
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
-        onTapDown: (_) => setState(() => _down = true),
+        onTapDown: (_) {
+          widget.onFeel?.call(pad: false); // buzz the moment the key goes down
+          setState(() => _down = true);
+        },
         onTapCancel: () => setState(() => _down = false),
         onTapUp: (_) {
           setState(() => _down = false);

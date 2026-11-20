@@ -38,6 +38,18 @@ class PlatformBridge {
     } catch (_) {}
   }
 
+  /// A short "key click" you can feel. [pad] = the press came from a game
+  /// controller, so rumble the controller instead of the phone.
+  static void keyClick({bool pad = false}) {
+    if (_android) {
+      _ch.invokeMethod('keyClick', {'pad': pad}).catchError((_) {
+        HapticFeedback.selectionClick();
+      });
+    } else if (!pad) {
+      HapticFeedback.selectionClick(); // no-op on most desktops
+    }
+  }
+
   static Future<void> requestNotificationPermission() async {
     if (!_android) return;
     try {

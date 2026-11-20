@@ -186,6 +186,10 @@ class AppSettings extends ChangeNotifier {
   bool get t9Predictive => _p.getBool('t9Predictive') ?? true;
   set t9Predictive(bool v) => _set('t9Predictive', v);
 
+  /// Buzz on each on-screen key press (phone vibration, controller rumble).
+  bool get keyFeedback => _p.getBool('keyFeedback') ?? true;
+  set keyFeedback(bool v) => _set('keyFeedback', v);
+
   String get phoneStyle => _p.getString('phoneStyle') ?? 'candybar';
   set phoneStyle(String v) => _set('phoneStyle', v);
 

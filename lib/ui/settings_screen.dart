@@ -127,6 +127,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     value: s.t9Predictive,
                     label: 'Predictive text (T9): 43556 = hello',
                     onChanged: (v) => s.t9Predictive = v),
+                RetroCheckbox(
+                    value: s.keyFeedback,
+                    label: 'Buzz when I press a key (phone vibrates; controller rumbles on Android)',
+                    onChanged: (v) => s.keyFeedback = v),
                 const SizedBox(height: 4),
                 const Text('Phone style'),
                 Wrap(spacing: 4, runSpacing: 4, children: [

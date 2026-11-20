@@ -50,6 +50,7 @@ def patch_android():
         'android.permission.FOREGROUND_SERVICE_SPECIAL_USE',
         'android.permission.WAKE_LOCK',
         'android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS',
+        'android.permission.VIBRATE',
     ]
     add = ''.join(f'    <uses-permission android:name="{p}"/>\n' for p in perms if p not in man)
     if add:
