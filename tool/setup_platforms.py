@@ -87,6 +87,14 @@ def patch_desktop():
         s = read(lin).replace('"aim_for_android"', '"AIM"')
         write(lin, s)
         print('linux: patched')
+    cm = os.path.join(ROOT, 'linux', 'CMakeLists.txt')
+    if os.path.exists(cm):
+        s = read(cm)
+        # Newer clang rejects old headers bundled by some plugins under -Werror.
+        if '-Wno-deprecated-literal-operator' not in s:
+            s = s.replace('-Wall -Werror', '-Wall -Werror -Wno-deprecated-literal-operator')
+            write(cm, s)
+            print('linux: relaxed plugin warning')
     win = os.path.join(ROOT, 'windows', 'runner', 'main.cpp')
     if os.path.exists(win):
         s = read(win).replace('L"aim_for_android"', 'L"AIM"')

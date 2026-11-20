@@ -99,10 +99,14 @@ class AimClient {
   String? get awayHtml => _awayHtml;
   bool get isAway => (_awayHtml ?? '').isNotEmpty;
 
+  void _emit(ClientEvent e) {
+    if (!_events.isClosed) _events.add(e);
+  }
+
   void _setState(LinkState s, [String? msg]) {
     _state = s;
     lastMessage = msg;
-    _events.add(LinkStateChanged(s, msg));
+    _emit(LinkStateChanged(s, msg));
   }
 
   // ------------------------------------------------------------- lifecycle
@@ -191,7 +195,7 @@ class AimClient {
     await _session?.signOff();
     for (final m in outbox.where((m) => m.isPending).toList()) {
       m.status = OutboxStatus.cancelled;
-      _events.add(OutboxChanged(m));
+      _emit(OutboxChanged(m));
     }
     outbox.clear();
     _setState(LinkState.offline, null);
@@ -200,7 +204,7 @@ class AimClient {
   // ------------------------------------------------------------- events
 
   void _onSessionEvent(OscarEvent e) {
-    _events.add(SessionEvent(e));
+    _emit(SessionEvent(e));
     switch (e) {
       case BuddyArrived(:final info):
         final key = normalizeSn(info.screenName);
@@ -209,7 +213,7 @@ class AimClient {
           if (m.status == OutboxStatus.waitingForBuddy && normalizeSn(m.to) == key) {
             m.status = OutboxStatus.queued;
             m.note = null;
-            _events.add(OutboxChanged(m));
+            _emit(OutboxChanged(m));
             any = true;
           }
         }
@@ -262,7 +266,7 @@ class AimClient {
     final m = OutgoingMessage(
         '${DateTime.now().microsecondsSinceEpoch}-${_idSeq++}', to, text, DateTime.now(), OutboxStatus.queued);
     outbox.add(m);
-    _events.add(OutboxChanged(m));
+    _emit(OutboxChanged(m));
     _schedulePump(Duration.zero);
     return m;
   }
@@ -272,7 +276,7 @@ class AimClient {
     if (m == null || !m.isPending || m.status == OutboxStatus.sending) return false;
     m.status = OutboxStatus.cancelled;
     outbox.remove(m);
-    _events.add(OutboxChanged(m));
+    _emit(OutboxChanged(m));
     return true;
   }
 
@@ -282,7 +286,7 @@ class AimClient {
     if (m == null || m.status != OutboxStatus.failed) return;
     m.status = OutboxStatus.queued;
     m.note = null;
-    _events.add(OutboxChanged(m));
+    _emit(OutboxChanged(m));
     _schedulePump(Duration.zero);
   }
 
@@ -326,11 +330,11 @@ class AimClient {
           next.status = OutboxStatus.waitingForBuddy;
           next.note = 'Will send when ${next.to} signs on';
           next.nextTry = null;
-          _events.add(OutboxChanged(next));
+          _emit(OutboxChanged(next));
           continue;
         }
         next.status = OutboxStatus.sending;
-        _events.add(OutboxChanged(next));
+        _emit(OutboxChanged(next));
         final r = await s.sendIm(next.to, next.text);
         if (next.status == OutboxStatus.cancelled) continue;
         switch (r) {
@@ -354,7 +358,7 @@ class AimClient {
               next.status = OutboxStatus.queued; // link dropped; resend after reconnect
             }
         }
-        _events.add(OutboxChanged(next));
+        _emit(OutboxChanged(next));
       }
     } finally {
       _pumping = false;
