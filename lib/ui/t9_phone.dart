@@ -33,8 +33,11 @@ class OskRequest {
   final FocusNode? returnFocus;
   final List<OskLine> Function()? preview;
   final Listenable? previewListen;
+
+  /// Chat box: the green key sends and the phone stays open for the next message.
+  final bool keepOpen;
   OskRequest(this.controller, this.title, this.obscure, this.doneLabel, this.onDone, this.returnFocus,
-      {this.preview, this.previewListen});
+      {this.preview, this.previewListen, this.keepOpen = false});
 }
 
 class OskController extends ChangeNotifier {
@@ -57,9 +60,10 @@ class OskController extends ChangeNotifier {
     VoidCallback? onDone,
     List<OskLine> Function()? preview,
     Listenable? previewListen,
+    bool keepOpen = false,
   }) {
     current = OskRequest(controller, title, obscure, doneLabel, onDone, FocusManager.instance.primaryFocus,
-        preview: preview, previewListen: previewListen);
+        preview: preview, previewListen: previewListen, keepOpen: keepOpen);
     notifyListeners();
   }
 
@@ -416,7 +420,7 @@ class CartoonPhone extends StatefulWidget {
 }
 
 class _CartoonPhoneState extends State<CartoonPhone> with SingleTickerProviderStateMixin {
-  late final T9Engine _engine;
+  late T9Engine _engine;
   late final InputMode _input;
   late final AppSettings _settings;
   late final OskController _osk;
@@ -433,7 +437,7 @@ class _CartoonPhoneState extends State<CartoonPhone> with SingleTickerProviderSt
   void _numpad(String key) {
     _click();
     if (key == 'send') {
-      _leave(true);
+      _submit();
     } else if (key == 'del') {
       _backspace();
     } else if (key == 'mode') {
@@ -452,16 +456,7 @@ class _CartoonPhoneState extends State<CartoonPhone> with SingleTickerProviderSt
     _settings = context.read<AppSettings>();
     _input = context.read<InputMode>();
     _osk = context.read<OskController>();
-    _engine = T9Engine(
-      initial: _c.text,
-      predictive: _settings.t9Predictive && !widget.request.obscure,
-      onText: (t) {
-        _c.text = t;
-        _c.selection = TextSelection.collapsed(offset: t.length);
-        if (mounted) setState(() {});
-      },
-    );
-    if (widget.request.obscure) _engine.caseMode = T9Case.lower;
+    _engine = _makeEngine(_c.text);
     T9Dictionary.load().then((d) {
       _engine.dict = d;
       if (mounted) setState(() {});
@@ -529,6 +524,37 @@ class _CartoonPhoneState extends State<CartoonPhone> with SingleTickerProviderSt
     if (t.isNotEmpty) _setText(t.substring(0, t.length - 1));
   }
 
+  T9Engine _makeEngine(String initial) {
+    final e = T9Engine(
+      initial: initial,
+      predictive: _settings.t9Predictive && !widget.request.obscure,
+      onText: (t) {
+        _c.text = t;
+        _c.selection = TextSelection.collapsed(offset: t.length);
+        if (mounted) setState(() {});
+      },
+    );
+    if (widget.request.obscure) e.caseMode = T9Case.lower;
+    return e;
+  }
+
+  /// Green key / Start / number-pad Enter. In a chat it sends and stays open.
+  void _submit() {
+    final r = widget.request;
+    if (!r.keepOpen) {
+      _leave(true);
+      return;
+    }
+    if (!widget.qwerty) _engine.finish();
+    if (_c.text.trim().isEmpty) return;
+    r.onDone?.call(); // sends and clears the chat box
+    final dict = _engine.dict;
+    _engine = _makeEngine(_c.text)..dict = dict;
+    setState(() {
+      _shift = false;
+    });
+  }
+
   bool get _empty => _c.text.isEmpty && (widget.qwerty || !_engine.composing);
 
   void _togglePredictive() {
@@ -575,7 +601,7 @@ class _CartoonPhoneState extends State<CartoonPhone> with SingleTickerProviderSt
         _togglePredictive();
         return true;
       case PadAction.start:
-        _leave(true);
+        _submit();
         return true;
       case PadAction.lb:
         widget.qwerty ? _press(':)') : _engine.press('#');
@@ -594,7 +620,7 @@ class _CartoonPhoneState extends State<CartoonPhone> with SingleTickerProviderSt
     final t = widget.theme;
     final keys = PhoneKeys(
       press: _press,
-      send: () => _leave(true),
+      send: _submit,
       end: () => _leave(false),
       clear: _backspace,
       mode: _togglePredictive,

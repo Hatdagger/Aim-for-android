@@ -65,6 +65,7 @@ class RetroTextField extends StatelessWidget {
               doneLabel: doneLabel,
               preview: oskPreview,
               previewListen: oskPreviewListen,
+              keepOpen: enterSubmits,
               onDone: () {
                 onChanged?.call(controller.text);
                 onSubmitted?.call(controller.text);
