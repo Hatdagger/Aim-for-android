@@ -1,4 +1,5 @@
 import 'package:aim_for_android/app/numpad_t9.dart';
+import 'package:aim_for_android/app/settings.dart';
 import 'package:aim_for_android/app/sounds.dart';
 import 'package:aim_for_android/app/ui_sounds.dart';
 import 'package:aim_for_android/oscar/aim_html.dart';
@@ -10,6 +11,7 @@ import 'package:aim_for_android/ui/wallpaper.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
   test('number pad maps by position like a phone', () {
@@ -85,6 +87,25 @@ void main() {
       expect(tester.takeException(), isNull);
     });
   }
+
+  test('each chat can have its own keyboard', () async {
+    TestWidgetsFlutterBinding.ensureInitialized();
+    SharedPreferences.setMockInitialValues({});
+    final s = AppSettings();
+    await s.load();
+    s.phoneStyle = 'girlypop';
+    s.keyboardKind = 't9';
+    s.setKeyboardFor('Skater Grl', 'pocketbrick');
+    s.setKeyboardFor('bob', 'wideflip', kind: 'qwerty');
+    expect(s.phoneStyleFor('skatergrl'), 'pocketbrick'); // screen names ignore case and spaces
+    expect(s.phoneStyleFor('bob'), 'wideflip');
+    expect(s.keyboardKindFor('bob'), 'qwerty');
+    expect(s.phoneStyleFor('carol'), 'girlypop'); // no choice: the default
+    expect(s.phoneStyleFor(null), 'girlypop'); // sign-on boxes etc.
+    s.setKeyboardFor('bob', null);
+    expect(s.keyboardOverride('bob'), isNull);
+    expect(s.keyboardKindFor('bob'), 't9');
+  });
 
   test('phone and gadget ids are unique', () {
     final ids = kPhoneThemes.map((t) => t.id).toList();

@@ -212,6 +212,25 @@ class AppSettings extends ChangeNotifier {
   String get keyboardKind => _p.getString('keyboardKind') ?? 't9';
   set keyboardKind(String v) => _set('keyboardKind', v);
 
+  /// A chat's own keyboard (gadget/phone style and T9 or QWERTY), or null to
+  /// use the defaults above. Stored as 'style|kind'.
+  (String, String)? keyboardOverride(String sn) {
+    final v = _p.getString('kbd:${normalizeSn(sn)}');
+    if (v == null) return null;
+    final i = v.indexOf('|');
+    if (i < 0) return null;
+    final style = v.substring(0, i);
+    final kind = v.substring(i + 1);
+    return (const {'candybar': 'brick', 'flip': 'clamshell', 'slider': 'nightglow'}[style] ?? style, kind == 'qwerty' ? 'qwerty' : 't9');
+  }
+
+  void setKeyboardFor(String sn, String? style, {String kind = 't9'}) =>
+      style == null ? _remove('kbd:${normalizeSn(sn)}') : _set('kbd:${normalizeSn(sn)}', '$style|$kind');
+
+  /// Style / keyboard kind for typing in [chat] (a screen name), or the defaults.
+  String phoneStyleFor(String? chat) => (chat == null ? null : keyboardOverride(chat)?.$1) ?? phoneStyle;
+  String keyboardKindFor(String? chat) => (chat == null ? null : keyboardOverride(chat)?.$2) ?? keyboardKind;
+
   /// Phone placement in landscape, per keyboard kind: centre as a fraction
   /// of the free space (0 = left/top, 1 = right/bottom) and width as a
   /// fraction of the screen width.

@@ -29,6 +29,9 @@ class RetroTextField extends StatelessWidget {
   final List<OskLine> Function()? oskPreview;
   final Listenable? oskPreviewListen;
 
+  /// Screen name of the chat this box types into (it may have its own keyboard).
+  final String? oskChat;
+
   const RetroTextField({
     super.key,
     required this.controller,
@@ -45,6 +48,7 @@ class RetroTextField extends StatelessWidget {
     this.focusNode,
     this.oskPreview,
     this.oskPreviewListen,
+    this.oskChat,
   });
 
   @override
@@ -66,6 +70,7 @@ class RetroTextField extends StatelessWidget {
               preview: oskPreview,
               previewListen: oskPreviewListen,
               keepOpen: enterSubmits,
+              chat: oskChat,
               onDone: () {
                 onChanged?.call(controller.text);
                 onSubmitted?.call(controller.text);

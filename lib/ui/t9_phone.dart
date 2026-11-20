@@ -37,8 +37,11 @@ class OskRequest {
 
   /// Chat box: the green key sends and the phone stays open for the next message.
   final bool keepOpen;
+
+  /// Screen name of the chat being typed in (it may have its own keyboard).
+  final String? chat;
   OskRequest(this.controller, this.title, this.obscure, this.doneLabel, this.onDone, this.returnFocus,
-      {this.preview, this.previewListen, this.keepOpen = false});
+      {this.preview, this.previewListen, this.keepOpen = false, this.chat});
 }
 
 class OskController extends ChangeNotifier {
@@ -62,9 +65,10 @@ class OskController extends ChangeNotifier {
     List<OskLine> Function()? preview,
     Listenable? previewListen,
     bool keepOpen = false,
+    String? chat,
   }) {
     current = OskRequest(controller, title, obscure, doneLabel, onDone, FocusManager.instance.primaryFocus,
-        preview: preview, previewListen: previewListen, keepOpen: keepOpen);
+        preview: preview, previewListen: previewListen, keepOpen: keepOpen, chat: chat);
     notifyListeners();
   }
 
@@ -146,8 +150,8 @@ class _OskHostState extends State<OskHost> {
         return Stack(children: [Positioned.fill(child: widget.child)]);
       }
       final full = landscape ? s.phoneFullLandscape : s.phoneFullPortrait;
-      final kind = full ? (landscape ? 'qwerty' : 't9') : s.keyboardKind;
-      final theme = phoneThemeById(s.phoneStyle);
+      final kind = full ? (landscape ? 'qwerty' : 't9') : s.keyboardKindFor(req.chat);
+      final theme = phoneThemeById(s.phoneStyleFor(req.chat));
       // Gadgets with their own keyboard always type letter by letter.
       final qwerty = theme.letters(kind == 'qwerty');
       final art = PhoneArt.sizeFor(theme, qwerty);
