@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:aim_for_android/app/sounds.dart';
 import 'package:aim_for_android/importer/aim_installer.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -27,8 +28,17 @@ void main() {
         }
         i += 8 + len + (len & 1);
       }
+      // every classic sound converts to plain 16-bit 22050 Hz PCM for playback
+      final info = WavInfo.parse(b);
+      expect(info, isNotNull, reason: e.key);
+      final pcm = toPcm16(b, info!);
+      expect(pcm, isNotNull, reason: e.key);
+      final out = WavInfo.parse(pcm!)!;
+      expect([out.format, out.bits, out.rate, out.channels], [1, 16, 22050, 1], reason: e.key);
+      final secondsIn = info.dataLength / (info.bits ~/ 8 * info.channels) / info.rate;
+      expect(out.dataLength / 2 / 22050, closeTo(secondsIn, 0.01), reason: e.key);
       // ignore: avoid_print
-      print('::warning title=wav-format::${e.key} ${b.length} bytes ${String.fromCharCodes(b.sublist(0, 4))} $fmt');
+      print('::notice title=wav-format::${e.key} ${b.length} bytes ${String.fromCharCodes(b.sublist(0, 4))} $fmt');
     }
   }, skip: path == null ? 'AIM_INSTALLER not set' : false, timeout: const Timeout(Duration(minutes: 2)));
 

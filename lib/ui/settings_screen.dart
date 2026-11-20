@@ -71,6 +71,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
             child: ListView(children: [
               _section('Sounds', [
                 RetroCheckbox(value: s.soundsOn, label: 'Play sounds while the app is open', onChanged: (v) => s.soundsOn = v),
+                const Text('Sounds play at your media volume (on phones, the music/video volume).',
+                    style: TextStyle(fontSize: 12)),
                 if (_files.isEmpty)
                   const Padding(
                       padding: EdgeInsets.all(4), child: Text('No sounds imported yet.', style: TextStyle(fontStyle: FontStyle.italic))),
@@ -203,7 +205,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
         RetroButton(
           minWidth: 0,
           padding: const EdgeInsets.symmetric(horizontal: 8),
-          onPressed: current.isEmpty ? null : () => app.sounds.playFile(current),
+          onPressed: current.isEmpty
+              ? null
+              : () async {
+                  final err = await app.sounds.playFile(current);
+                  if (err != null && context.mounted) showRetroMessage(context, 'Sound', err);
+                },
           child: const Icon(Icons.play_arrow),
         ),
       ]),
