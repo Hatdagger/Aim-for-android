@@ -77,6 +77,22 @@ jobs:
           set -o pipefail
           flutter test --reporter expanded 2>&1 | tee "$RUNNER_TEMP/test.log"
 
+      - name: Phone/gadget pictures (PNGs on the previews/<branch> branch)
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -e
+          sudo apt-get install -y -q fonts-dejavu-core >/dev/null 2>&1 || true
+          OUT="$RUNNER_TEMP/previews"
+          AIM_PREVIEWS="$OUT" flutter test test/preview_render_test.dart
+          cd "$OUT"
+          git init -q
+          git checkout -q -b "previews/${GITHUB_REF_NAME}"
+          git add -A
+          git -c user.name="github-actions" -c user.email="actions@github.com" commit -qm "Pictures for ${GITHUB_SHA}"
+          git push -f -q "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" HEAD
+
       - name: Failure summary (as annotations)
         if: failure()
         run: |

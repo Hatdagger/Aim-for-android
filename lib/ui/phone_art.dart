@@ -100,7 +100,7 @@ class PhoneArt extends StatelessWidget {
     final letters = t.letters(qwerty);
     final Widget art = switch (t.device) {
       Device.phone => letters ? _slider(size) : (t.flip ? _flip() : _candybar()),
-      Device.wideFlip => letters ? _wideFlip() : _candybar(),
+      Device.wideFlip => WideFlipArt(t: t, letters: letters, open: open, power: power, keys: keys, screen: screen),
       Device.dashboard => DashboardArt(t: t, open: open, power: power, keys: keys, screen: screen),
       Device.pocketMail => PocketMailArt(t: t, power: power, keys: keys, screen: screen),
       Device.musicPlayer => MusicPlayerArt(t: t, open: open, power: power, keys: keys, screen: screen),
@@ -462,119 +462,6 @@ class PhoneArt extends StatelessWidget {
     ]);
   }
 
-
-  // ------------------------------------------------------------ wide flip
-
-  /// Opens like a little laptop: the top half (wide screen) swings up from
-  /// lying over the keyboard. Closed, you see the outside: a small screen and
-  /// a number pad (it's a keypad phone from the outside).
-  Widget _wideFlip() {
-    const w = 820.0, left = 10.0, lidTop = 20.0, lidH = 330.0, hingeH = 22.0, baseH = 330.0;
-    const baseTop = lidTop + lidH + hingeH;
-    final angle = (1 - open) * pi;
-    final showBack = angle > pi / 2;
-    final inside = ShellBox(
-      color: t.lid,
-      ink: t.ink,
-      radius: const BorderRadius.vertical(top: Radius.circular(46), bottom: Radius.circular(18)),
-      padding: const EdgeInsets.fromLTRB(22, 22, 22, 22),
-      child: Row(children: [
-        Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-          _speakerSlot(),
-          const SizedBox(height: 20),
-          Container(
-            width: 22,
-            height: 22,
-            decoration: BoxDecoration(color: t.softBg, shape: BoxShape.circle, border: Border.all(color: t.ink, width: 4)),
-          ),
-        ]),
-        const SizedBox(width: 18),
-        Expanded(child: _screenBox(height: 270)),
-        const SizedBox(width: 18),
-        Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-          SizedBox(width: 96, child: _pill(keys.sendLabel, kSendGreen, t.ink, keys.send, height: 56, font: 16)),
-          const SizedBox(height: 14),
-          SizedBox(width: 96, child: _pill('Clear', t.softBg, t.softInk, keys.clear, height: 56, font: 16)),
-          const SizedBox(height: 14),
-          SizedBox(width: 96, child: _pill('End', kEndRed, t.ink, keys.end, height: 56, font: 16)),
-        ]),
-      ]),
-    );
-    // The outside of the lid, seen while it is still shut.
-    final outside = ShellBox(
-      color: t.shell,
-      ink: t.ink,
-      radius: const BorderRadius.vertical(top: Radius.circular(46), bottom: Radius.circular(18)),
-      padding: const EdgeInsets.all(28),
-      child: Row(children: [
-        Container(
-          width: 250,
-          decoration: BoxDecoration(color: t.screenOff, borderRadius: BorderRadius.circular(16), border: Border.all(color: t.ink, width: 5)),
-          alignment: Alignment.center,
-          child: Text('AIM', style: TextStyle(color: t.screenOn.withValues(alpha: 0.5), fontSize: 40, fontWeight: FontWeight.w900)),
-        ),
-        const SizedBox(width: 30),
-        Expanded(
-          child: GridView.count(
-            crossAxisCount: 4,
-            physics: const NeverScrollableScrollPhysics(),
-            mainAxisSpacing: 12,
-            crossAxisSpacing: 12,
-            childAspectRatio: 1.9,
-            children: [
-              for (final k in const ['1', '2', '3', '*', '4', '5', '6', '0', '7', '8', '9', '#'])
-                Container(
-                  alignment: Alignment.center,
-                  decoration: BoxDecoration(
-                      color: t.keyBg, borderRadius: BorderRadius.circular(14), border: Border.all(color: t.ink, width: 3)),
-                  child: Text(k, style: _keyText(22)),
-                ),
-            ],
-          ),
-        ),
-      ]),
-    );
-    return Stack(clipBehavior: Clip.none, children: [
-      Positioned(
-        left: left,
-        top: baseTop,
-        width: w,
-        height: baseH,
-        child: ShellBox(
-          color: t.body,
-          ink: t.ink,
-          shine: false,
-          radius: const BorderRadius.vertical(top: Radius.circular(18), bottom: Radius.circular(46)),
-          padding: const EdgeInsets.fromLTRB(20, 22, 20, 6),
-          child: ClipRect(
-            child: OverflowBox(alignment: Alignment.topCenter, maxHeight: double.infinity, child: _qwertyKeys()),
-          ),
-        ),
-      ),
-      Positioned(
-        left: left + 40,
-        top: lidTop + lidH - 4,
-        width: w - 80,
-        height: hingeH + 8,
-        child: Container(
-          decoration: BoxDecoration(color: t.hinge, borderRadius: BorderRadius.circular(14), border: Border.all(color: t.ink, width: 5)),
-        ),
-      ),
-      Positioned(
-        left: left,
-        top: lidTop,
-        width: w,
-        height: lidH,
-        child: Transform(
-          alignment: Alignment.bottomCenter,
-          transform: Matrix4.identity()
-            ..setEntry(3, 2, 0.0009)
-            ..rotateX(-angle),
-          child: showBack ? _flipBack(outside) : inside,
-        ),
-      ),
-    ]);
-  }
 
   Widget _dpad() => Container(
         width: 92,
