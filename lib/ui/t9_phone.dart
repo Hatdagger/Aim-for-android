@@ -852,7 +852,7 @@ class MiniScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final fs = t.mono ? 21.0 : 17.0;
     final glow = t.glow ? [Shadow(color: t.screenInk.withValues(alpha: 0.6), blurRadius: 6)] : null;
-    return DefaultTextStyle(
+    return DefaultTextStyle.merge(
       style: TextStyle(color: t.screenInk, fontSize: fs, fontFamily: t.fontFamily, height: 1.15, shadows: glow),
       child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
         Row(children: [

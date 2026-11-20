@@ -909,7 +909,7 @@ class DashboardArt extends StatelessWidget {
         const IgnorePointer(
           child: DecoratedBox(
             decoration: BoxDecoration(
-              gradient: RadialGradient(radius: 0.9, colors: [Color(0x00000000), Color(0x00000000), Color(0xB0000000)], stops: [0, 0.6, 1]),
+              gradient: RadialGradient(radius: 0.9, colors: [Color(0x00000000), Color(0x00000000), Color(0x80000000)], stops: [0, 0.65, 1]),
             ),
           ),
         ),
@@ -1796,7 +1796,7 @@ class PocketBrickArt extends StatelessWidget {
               alignment: a,
               child: Padding(
                 padding: const EdgeInsets.all(10),
-                child: Transform.rotate(angle: angle, child: const Text('▲', style: TextStyle(color: Color(0xFF3E3E44), fontSize: 12))),
+                child: Transform.rotate(angle: angle, child: const Text('▲', style: TextStyle(color: Color(0xFF6A6A72), fontSize: 13, shadows: [Shadow(color: Color(0xFF0A0A0C), offset: Offset(0, 1))]))),
               ),
             ),
         ]),
