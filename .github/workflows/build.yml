@@ -73,7 +73,25 @@ jobs:
         env:
           AIM_INSTALLER: ${{ runner.temp }}/aim513036.exe
           OSCAR_SERVER: 127.0.0.1:5190
-        run: flutter test --reporter expanded
+        run: |
+          set -o pipefail
+          flutter test --reporter expanded 2>&1 | tee "$RUNNER_TEMP/test.log"
+
+      - name: Failure summary (as annotations)
+        if: failure()
+        run: |
+          # Annotations can be read without signing in to GitHub.
+          python3 - <<'PY'
+          import os, re
+          log = open(os.environ['RUNNER_TEMP'] + '/test.log', errors='replace').read()
+          log = re.sub(r'\x1b\[[0-9;]*m', '', log)
+          blocks = re.split(r'\n(?=\d+:\d+ \+\d+)', log)
+          bad = [b for b in blocks if '[E]' in b.split('\n')[0] or 'Some tests failed' in b]
+          for b in (bad or [log[-6000:]])[:8]:
+              msg = b[:3500].replace('%', '%25').replace('\r', '').replace('\n', '%0A')
+              print('::error title=test failure::' + msg)
+          PY
+          tail -40 "$RUNNER_TEMP/oos.log" | sed 's/^/::notice title=server log::/' || true
 
       - name: Server log
         if: always()
