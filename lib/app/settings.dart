@@ -194,7 +194,12 @@ class AppSettings extends ChangeNotifier {
   bool get keyFeedback => _p.getBool('keyFeedback') ?? true;
   set keyFeedback(bool v) => _set('keyFeedback', v);
 
-  /// Cartoon phone look: brick, ice, nightglow, clamshell, girlypop, gyaru.
+  /// Clicks, flips, slides and boot beeps from the on-screen phones/gadgets.
+  bool get phoneSounds => _p.getBool('phoneSounds') ?? true;
+  set phoneSounds(bool v) => _set('phoneSounds', v);
+
+  /// Cartoon phone look: brick, ice, nightglow, clamshell, girlypop, gyaru,
+  /// or a gadget: wideflip, dashboard, pocketmail, musicplayer, pocketbrick.
   /// Older builds stored candybar/flip/slider; those map to the new looks.
   String get phoneStyle {
     final v = _p.getString('phoneStyle') ?? 'brick';

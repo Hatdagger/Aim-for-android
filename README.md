@@ -13,6 +13,11 @@ An old-school AIM client with modern behaviour, for servers running
   away messages, typing indicator.
 - Controller support (Steam Deck, ROG Ally, XInput, Android pads) with a T9 phone
   keypad that docks beside the chat — predictive or multi-tap, in several phone styles.
+- Gadget keyboards: a wide flip phone that opens sideways to a keyboard, a glowing console
+  keyboard under a tube TV that switches on like a CRT, a thumb-keyboard "pocket mail" phone,
+  a click-wheel music player whose keyboard slides up over the wheel, and a green-screen
+  handheld that boots with a beeeep and pops up a name-entry style letter box (arrows / D-pad
+  move the ▶). Key clicks and flip/slide/boot sounds are made in code (Prefs can turn them off).
 - Invite links: "Get a Screen Name" with an invite from a friend.
 - Optional chat history (off by default, cleared when you sign off).
 

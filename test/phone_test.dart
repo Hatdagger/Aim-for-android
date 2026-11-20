@@ -1,4 +1,6 @@
 import 'package:aim_for_android/app/numpad_t9.dart';
+import 'package:aim_for_android/app/sounds.dart';
+import 'package:aim_for_android/app/ui_sounds.dart';
 import 'package:aim_for_android/oscar/aim_html.dart';
 import 'package:aim_for_android/ui/phone_art.dart';
 import 'package:aim_for_android/ui/phone_theme.dart';
@@ -83,6 +85,55 @@ void main() {
       expect(tester.takeException(), isNull);
     });
   }
+
+  test('phone and gadget ids are unique', () {
+    final ids = kPhoneThemes.map((t) => t.id).toList();
+    expect(ids.toSet().length, ids.length);
+  });
+
+  test('gadget sounds make valid, unclipped WAVs', () {
+    for (final s in UiSound.values) {
+      final samples = synthSamples(s);
+      expect(samples, isNotEmpty, reason: s.name);
+      expect(samples.every((x) => x.abs() <= 1.0), isTrue, reason: '${s.name} clips');
+      final wav = WavInfo.parse(wavFromSamples(samples));
+      expect(wav, isNotNull, reason: s.name);
+      expect(wav!.bits, 16);
+      expect(wav.dataLength, samples.length * 2);
+    }
+    // The handheld's boot beep is long and the key click is short.
+    expect(synthSamples(UiSound.beep).length, greaterThan(synthSamples(UiSound.key).length * 10));
+  });
+
+  testWidgets('gadget keyboards type and send', (tester) async {
+    for (final (id, letter, sendLabel) in const [
+      ('pocketbrick', 'a', 'ED'),
+      ('dashboard', 'a', 'DONE'),
+      ('musicplayer', 'g', 'return'),
+      ('pocketmail', 'g', '⏎'),
+    ]) {
+      final t = phoneThemeById(id);
+      final typed = <String>[];
+      var sent = 0;
+      await pumpArt(
+        tester,
+        SizedBox.fromSize(
+          size: PhoneArt.sizeFor(t, false),
+          child: PhoneArt(
+            t: t,
+            qwerty: false,
+            keys: PhoneKeys(press: typed.add, send: () => sent++, end: () {}, clear: () {}, mode: () {}),
+            screen: const SizedBox(),
+          ),
+        ),
+      );
+      await tester.tap(find.text(letter).first);
+      await tester.tap(find.text(sendLabel).first);
+      expect(typed, [letter], reason: id);
+      expect(sent, 1, reason: id);
+      expect(tester.takeException(), isNull);
+    }
+  });
 
   testWidgets('wallpapers paint', (tester) async {
     for (final w in kBuiltinWallpapers) {

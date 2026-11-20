@@ -10,6 +10,7 @@ import 'retro.dart';
 import 'retro_text_field.dart';
 import 'setup_wizard.dart';
 import 'chat.dart';
+import 'phone_art.dart';
 import 'phone_theme.dart';
 import 't9_phone.dart';
 import 'wallpaper.dart';
@@ -165,7 +166,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     'and you can drag it around.',
                     style: TextStyle(fontSize: 12)),
                 const SizedBox(height: 6),
-                const Text('Phone style'),
+                const Text('Phone or gadget'),
+                const Text(
+                    'Wide Flip is a keypad phone that opens sideways to a keyboard. Console TV, Pocket Mail, '
+                    'Music Player and Pocket Brick always use their own keyboard. Arrows / D-pad move between keys, A presses.',
+                    style: TextStyle(fontSize: 12)),
                 const SizedBox(height: 4),
                 Wrap(spacing: 6, runSpacing: 6, children: [
                   for (final p in kPhoneThemes)
@@ -181,7 +186,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                 color: s.phoneStyle == p.id ? Retro.navy : const Color(0x00000000), width: 3),
                           ),
                           child: Column(children: [
-                            SizedBox(height: s.keyboardKind == 'qwerty' ? 90 : 150, child: PhonePreview(t: p, qwerty: s.keyboardKind == 'qwerty')),
+                            SizedBox(
+                                height: PhoneArt.sizeFor(p, s.keyboardKind == 'qwerty').aspectRatio > 1.05 ? 90 : 150,
+                                child: PhonePreview(t: p, qwerty: s.keyboardKind == 'qwerty')),
                             const SizedBox(height: 4),
                             Text(p.name, style: TextStyle(fontWeight: s.phoneStyle == p.id ? FontWeight.bold : FontWeight.normal)),
                             Text(p.blurb, textAlign: TextAlign.center, style: const TextStyle(fontSize: 11)),
@@ -207,6 +214,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     value: s.keyFeedback,
                     label: 'Buzz when I press a key (phone vibrates; controller rumbles on Android)',
                     onChanged: (v) => s.keyFeedback = v),
+                RetroCheckbox(
+                    value: s.phoneSounds,
+                    label: 'Phone sounds: key clicks, flips, slides, TV switch-on, handheld boot beep',
+                    onChanged: (v) => s.phoneSounds = v),
                 RetroButton(
                   onPressed: s.resetOskPlacement,
                   child: const Text('Put the phone back in its usual spot and size'),

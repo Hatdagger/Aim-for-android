@@ -11,6 +11,7 @@ import '../app/numpad_t9.dart';
 import '../app/platform_bridge.dart';
 import '../app/settings.dart';
 import '../app/t9.dart';
+import '../app/ui_sounds.dart';
 import 'phone_art.dart';
 import 'phone_theme.dart';
 import 'retro.dart';
@@ -146,11 +147,13 @@ class _OskHostState extends State<OskHost> {
       }
       final full = landscape ? s.phoneFullLandscape : s.phoneFullPortrait;
       final kind = full ? (landscape ? 'qwerty' : 't9') : s.keyboardKind;
-      final qwerty = kind == 'qwerty';
       final theme = phoneThemeById(s.phoneStyle);
+      // Gadgets with their own keyboard always type letter by letter.
+      final qwerty = theme.letters(kind == 'qwerty');
       final art = PhoneArt.sizeFor(theme, qwerty);
       final aspect = art.width / art.height;
-      final phone = CartoonPhone(key: ValueKey('${identityHashCode(req)}-$kind'), request: req, theme: theme, qwerty: qwerty);
+      final phone = CartoonPhone(
+          key: ValueKey('${identityHashCode(req)}-$kind-${theme.id}'), request: req, theme: theme, qwerty: qwerty);
 
       Widget fullToggle(bool on) => Tooltip(
             message: on ? 'Show the chat behind the phone' : 'Phone fills the screen',
@@ -407,6 +410,62 @@ class _ArrangeBar extends StatelessWidget {
   }
 }
 
+/// When things happen while a phone/gadget appears (fractions of [ms]).
+class _Timeline {
+  final int ms;
+  final double riseEnd, openA, openB, powerA, powerB, splashEnd;
+
+  /// Opens with a moving part (lid, slider, keyboard) rather than a squash landing.
+  final bool springs;
+
+  /// Handheld boot: the name slides down the screen between these.
+  final double scrollA, scrollB;
+
+  /// Sounds to play as the animation passes each point.
+  final List<(double, UiSound)> cues;
+  const _Timeline({
+    this.ms = 1500,
+    this.riseEnd = 0.4,
+    this.openA = 0.4,
+    this.openB = 0.66,
+    this.powerA = 0.66,
+    this.powerB = 0.72,
+    this.splashEnd = 0.95,
+    required this.springs,
+    this.scrollA = 0,
+    this.scrollB = 0,
+    this.cues = const [],
+  });
+
+  static _Timeline of(PhoneTheme t, bool letters) {
+    switch (t.device) {
+      case Device.dashboard:
+        return const _Timeline(
+            ms: 1900, riseEnd: 0.28, powerA: 0.3, powerB: 0.48, openA: 0.52, openB: 0.74, splashEnd: 0.9, springs: true,
+            cues: [(0.3, UiSound.crt), (0.52, UiSound.slide)]);
+      case Device.musicPlayer:
+        return const _Timeline(
+            ms: 1700, riseEnd: 0.3, powerA: 0.32, powerB: 0.4, openA: 0.52, openB: 0.78, splashEnd: 0.9, springs: true,
+            cues: [(0.32, UiSound.chirp), (0.52, UiSound.slide)]);
+      case Device.pocketBrick:
+        // A beat of blank screen, the name slides down, beeeep, then the letter box.
+        return const _Timeline(
+            ms: 3200, riseEnd: 0.16, powerA: 0.19, powerB: 0.21, scrollA: 0.26, scrollB: 0.56, openA: 0.78, openB: 0.88,
+            splashEnd: 0.92, springs: true, cues: [(0.18, UiSound.land), (0.575, UiSound.beep), (0.78, UiSound.pop)]);
+      case Device.pocketMail:
+        return const _Timeline(springs: false, cues: [(0.34, UiSound.land), (0.66, UiSound.chirp)]);
+      case Device.phone:
+      case Device.wideFlip:
+        final springs = t.flip || letters;
+        return _Timeline(springs: springs, cues: [
+          if (springs) (0.4, letters ? (t.device == Device.wideFlip ? UiSound.flip : UiSound.slide) : UiSound.flip),
+          if (!springs) (0.34, UiSound.land),
+          (0.66, UiSound.chirp),
+        ]);
+    }
+  }
+}
+
 /// The animated, working phone: rises in, opens (flip lid / slider screen),
 /// powers on its screen, then types into [request].
 class CartoonPhone extends StatefulWidget {
@@ -427,7 +486,9 @@ class _CartoonPhoneState extends State<CartoonPhone> with SingleTickerProviderSt
   late final AnimationController _anim =
       AnimationController(vsync: this, duration: const Duration(milliseconds: 1500));
   final _scope = FocusScopeNode(debugLabel: 'Phone keyboard');
-  bool _shift = false, _sym = false, _leaving = false;
+  bool _shift = false, _sym = false, _caps = false, _leaving = false;
+  late final _Timeline _tl = _Timeline.of(widget.theme, widget.qwerty);
+  final _fired = <int>{};
   static final _never = ValueNotifier<int>(0);
 
   TextEditingController get _c => widget.request.controller;
@@ -464,12 +525,16 @@ class _CartoonPhoneState extends State<CartoonPhone> with SingleTickerProviderSt
     _input.pushHandler(_onPad);
     _osk.numpadSink = _numpad;
     _numpadT9 = context.read<NumpadT9>();
+    _anim.duration = Duration(milliseconds: _tl.ms);
+    _anim.addListener(_playCues);
+    if (_settings.phoneSounds) UiSounds.instance.warmUp();
     _anim.forward();
     WidgetsBinding.instance.addPostFrameCallback((_) => _scope.requestFocus());
   }
 
   @override
   void dispose() {
+    _anim.removeListener(_playCues);
     _input.removeHandler(_onPad);
     if (_osk.numpadSink == _numpad) _osk.numpadSink = null;
     _scope.dispose();
@@ -479,6 +544,26 @@ class _CartoonPhoneState extends State<CartoonPhone> with SingleTickerProviderSt
 
   void _click({bool pad = false}) {
     if (_settings.keyFeedback) PlatformBridge.keyClick(pad: pad);
+    _sfx(switch (widget.theme.device) {
+      Device.pocketBrick => UiSound.pixel,
+      Device.dashboard => UiSound.jewel,
+      Device.musicPlayer => UiSound.tick,
+      _ => UiSound.key,
+    });
+  }
+
+  void _sfx(UiSound s) {
+    if (_settings.phoneSounds) UiSounds.instance.play(s);
+  }
+
+  /// Plays the flip / slide / boot sounds as the opening animation passes them.
+  void _playCues() {
+    if (_anim.status != AnimationStatus.forward) return;
+    final v = _anim.value;
+    for (var i = 0; i < _tl.cues.length; i++) {
+      final (at, sound) = _tl.cues[i];
+      if (v >= at && _fired.add(i)) _sfx(sound);
+    }
   }
 
   // ------------------------------------------------------------ typing
@@ -502,6 +587,11 @@ class _CartoonPhoneState extends State<CartoonPhone> with SingleTickerProviderSt
           _sym = !_sym;
           _shift = false;
         });
+      case 'caps':
+        setState(() {
+          _caps = !_caps;
+          _shift = false;
+        });
       case 'del':
         _backspace();
       case 'space':
@@ -509,7 +599,7 @@ class _CartoonPhoneState extends State<CartoonPhone> with SingleTickerProviderSt
       case ':)':
         _setText('${_c.text}:) ');
       default:
-        final ch = _shift && !_sym ? k.toUpperCase() : k;
+        final ch = (_shift != _caps) && !_sym ? k.toUpperCase() : k;
         _shift = false;
         _setText(_c.text + ch);
     }
@@ -559,7 +649,7 @@ class _CartoonPhoneState extends State<CartoonPhone> with SingleTickerProviderSt
 
   void _togglePredictive() {
     if (widget.qwerty) {
-      _press('sym');
+      _press(widget.theme.device == Device.pocketBrick ? 'caps' : 'sym');
       return;
     }
     if (widget.request.obscure) return;
@@ -572,6 +662,7 @@ class _CartoonPhoneState extends State<CartoonPhone> with SingleTickerProviderSt
     if (_leaving) return;
     _leaving = true;
     if (!widget.qwerty) _engine.finish();
+    _sfx(UiSound.close);
     await _anim.animateBack(0, duration: const Duration(milliseconds: 380), curve: Curves.easeIn);
     if (mounted) _osk.close(submitted: submitted);
   }
@@ -630,6 +721,7 @@ class _CartoonPhoneState extends State<CartoonPhone> with SingleTickerProviderSt
       predictive: _engine.predictive,
       shift: _shift,
       sym: _sym,
+      caps: _caps,
     );
     return CallbackShortcuts(
       bindings: {const SingleActivator(LogicalKeyboardKey.escape): () => _leave(false)},
@@ -639,12 +731,13 @@ class _CartoonPhoneState extends State<CartoonPhone> with SingleTickerProviderSt
         animation: _anim,
         builder: (ctx, _) {
           final v = _anim.value;
-          final rise = Curves.easeOutBack.transform(_seg(v, 0, 0.4));
-          final springs = t.flip || widget.qwerty;
-          final open = springs ? Curves.easeInOutCubic.transform(_seg(v, 0.4, 0.66)) : 1.0;
+          final tl = _tl;
+          final rise = Curves.easeOutBack.transform(_seg(v, 0, tl.riseEnd));
+          final springs = tl.springs;
+          final open = springs ? Curves.easeInOutCubic.transform(_seg(v, tl.openA, tl.openB)) : 1.0;
           final squash = springs ? 1.0 : 1 - 0.07 * sin(pi * _seg(v, 0.34, 0.56));
-          final power = _seg(v, 0.66, 0.72);
-          final splash = v < 0.95;
+          final power = _seg(v, tl.powerA, tl.powerB);
+          final splash = v < tl.splashEnd;
           return FractionalTranslation(
             translation: Offset(0, (1 - rise) * 1.15),
             child: FittedBox(
@@ -656,7 +749,11 @@ class _CartoonPhoneState extends State<CartoonPhone> with SingleTickerProviderSt
                 squash: squash,
                 power: power,
                 keys: keys,
-                screen: splash ? _Splash(t: t) : _screen(t, _seg(v, 0.95, 1)),
+                screen: splash
+                    ? (t.device == Device.pocketBrick
+                        ? _ScrollSplash(t: t, scroll: Curves.linear.transform(_seg(v, tl.scrollA, tl.scrollB)))
+                        : _Splash(t: t))
+                    : _screen(t, _seg(v, tl.splashEnd, 1)),
               ),
             ),
           );
@@ -675,12 +772,33 @@ class _CartoonPhoneState extends State<CartoonPhone> with SingleTickerProviderSt
         child: MiniScreen(
           t: t,
           title: r.title,
-          mode: widget.qwerty ? (_sym ? 'SYM' : (_shift ? 'SHIFT' : 'abc')) : _engine.modeLabel,
+          mode: widget.qwerty ? (_sym ? 'SYM' : (_caps ? 'CAPS' : (_shift ? 'SHIFT' : 'abc'))) : _engine.modeLabel,
           lines: r.preview?.call() ?? const [],
           text: r.obscure ? '•' * _c.text.length : (widget.qwerty ? _c.text : _engine.text),
           footer: !widget.qwerty && _engine.predictive && _engine.candidates.length > 1
               ? '${_engine.candidateIndex + 1}/${_engine.candidates.length}  * next word'
-              : 'Send ▸ green key',
+              : t.sendHint,
+        ),
+      ),
+    );
+  }
+}
+
+/// The handheld's boot: its name slides down from the top and stops in the
+/// middle (the beeeep plays as it lands).
+class _ScrollSplash extends StatelessWidget {
+  final PhoneTheme t;
+  final double scroll;
+  const _ScrollSplash({required this.t, required this.scroll});
+
+  @override
+  Widget build(BuildContext context) {
+    return Align(
+      alignment: Alignment(0, -2.4 + 2.3 * scroll),
+      child: FittedBox(
+        child: Text(
+          t.splash,
+          style: TextStyle(color: t.screenInk, fontSize: 64, fontWeight: FontWeight.w900, fontFamily: t.fontFamily, letterSpacing: 4),
         ),
       ),
     );
@@ -791,10 +909,10 @@ class PhonePreview extends StatelessWidget {
           screen: MiniScreen(
             t: t,
             title: 'SkaterGrl0414',
-            mode: qwerty ? 'abc' : 'T9',
+            mode: t.letters(qwerty) ? 'abc' : 'T9',
             lines: const [OskLine('SkaterGrl', 'u coming online tonight?', false), OskLine('me', 'ya after dinner', true)],
             text: 'bring ur A game lol',
-            footer: 'Send ▸ green key',
+            footer: t.sendHint,
           ),
         ),
       ),

@@ -6,6 +6,11 @@ import 'package:flutter/material.dart';
 /// Values come from the design canvas (aim-t9-handover/generators/cartoon.py).
 enum BodyPattern { plain, dots, leopard }
 
+/// What kind of gadget it is. [phone]s use the T9 keypad or slide-out QWERTY
+/// (per the keyboard setting); [wideFlip] is a keypad phone that opens the long
+/// way to a keyboard; the rest always use their own keyboard.
+enum Device { phone, wideFlip, dashboard, pocketMail, musicPlayer, pocketBrick }
+
 class PhoneTheme {
   final String id;
   final String name;
@@ -28,6 +33,10 @@ class PhoneTheme {
   final Color softBg, softInk;
   final Color focus;
   final String splash;
+  final Device device;
+
+  /// Hint under the chat on the little screen.
+  final String sendHint;
   // decorations
   final Color? antennaBall; // plain antenna
   final bool bow, heartAntenna, rhinestones, bubbles;
@@ -62,6 +71,8 @@ class PhoneTheme {
     required this.softInk,
     required this.focus,
     this.splash = 'aim',
+    this.device = Device.phone,
+    this.sendHint = 'Send ▸ green key',
     this.antennaBall,
     this.bow = false,
     this.heartAntenna = false,
@@ -73,6 +84,16 @@ class PhoneTheme {
         hinge = hinge ?? body;
 
   String? get fontFamily => mono ? 'monospace' : null;
+
+  /// True when typing is letter-by-letter (a keyboard), false for the T9 keypad.
+  /// [qwertyKind] is the user's keyboard setting (or the full-screen choice).
+  bool letters(bool qwertyKind) => switch (device) {
+        Device.phone || Device.wideFlip => qwertyKind,
+        _ => true,
+      };
+
+  /// Gadgets that always use their own keyboard (the keyboard setting does nothing).
+  bool get ownKeyboard => device != Device.phone && device != Device.wideFlip;
 }
 
 const kSendGreen = Color(0xFF3CCF6E);
@@ -231,6 +252,122 @@ const kPhoneThemes = <PhoneTheme>[
     heartAntenna: true,
     rhinestones: true,
     strap: [Color(0xFFFF2E93), Color(0xFFFFD76A), Color(0xFFFFFFFF), Color(0xFF1A0A12)],
+  ),
+  PhoneTheme(
+    id: 'wideflip',
+    name: 'Wide Flip',
+    blurb: 'Keypad phone that opens the long way to a keyboard',
+    device: Device.wideFlip,
+    ink: Color(0xFF0E1116),
+    body: Color(0xFF3B414B),
+    lid: Color(0xFF3B414B),
+    shell: Color(0xFF2A2E35),
+    hinge: Color(0xFF9AA3AF),
+    screenOn: Color(0xFFE8F1FF),
+    screenOff: Color(0xFF3E4A5C),
+    screenInk: Color(0xFF0B1B33),
+    screenDim: Color(0xFF3A5478),
+    me: Color(0xFF0B5CD6),
+    them: Color(0xFFC0392B),
+    keyBg: Color(0xFF1C2027),
+    keyInk: Color(0xFFFFFFFF),
+    keySub: Color(0xFF9FB3C8),
+    keyRadius: BorderRadius.all(Radius.circular(12)),
+    softBg: Color(0xFF7FB6FF),
+    softInk: Color(0xFF0E1116),
+    focus: Color(0xFFFFC233),
+  ),
+  PhoneTheme(
+    id: 'dashboard',
+    name: 'Console TV',
+    blurb: 'Glowing green console keyboard under a tube TV',
+    device: Device.dashboard,
+    ink: Color(0xFF041004),
+    body: Color(0xFF2A2A2E),
+    screenOn: Color(0xFF031003),
+    screenOff: Color(0xFF000000),
+    screenInk: Color(0xFF8CFF5A),
+    screenDim: Color(0xFF4CB832),
+    me: Color(0xFFE8FFD0),
+    them: Color(0xFF8CFF5A),
+    mono: true,
+    glow: true,
+    keyBg: Color(0xFF3FA51F),
+    keyInk: Color(0xFFFFFFFF),
+    keySub: Color(0xFFB8F58F),
+    softBg: Color(0xFF8CFF5A),
+    softInk: Color(0xFF041004),
+    focus: Color(0xFFD8FF7A),
+    splash: 'AIM',
+    sendHint: 'DONE sends · B deletes',
+  ),
+  PhoneTheme(
+    id: 'pocketmail',
+    name: 'Pocket Mail',
+    blurb: 'Thumb keyboard and a trackball',
+    device: Device.pocketMail,
+    ink: Color(0xFF0B0C0F),
+    body: Color(0xFF2D3038),
+    screenOn: Color(0xFFF2F6FA),
+    screenOff: Color(0xFF39414D),
+    screenInk: Color(0xFF14202E),
+    screenDim: Color(0xFF5A6B80),
+    me: Color(0xFF1565C0),
+    them: Color(0xFF2E7D32),
+    keyBg: Color(0xFF15161A),
+    keyInk: Color(0xFFFFFFFF),
+    keySub: Color(0xFF8FA3B8),
+    keyRadius: BorderRadius.all(Radius.circular(10)),
+    softBg: Color(0xFFB8BEC8),
+    softInk: Color(0xFF0B0C0F),
+    focus: Color(0xFF5AB2FF),
+    splash: 'aim mail',
+    sendHint: 'Send ▸ green key or ⏎',
+  ),
+  PhoneTheme(
+    id: 'musicplayer',
+    name: 'Music Player',
+    blurb: 'Click-wheel player; a white keyboard slides up',
+    device: Device.musicPlayer,
+    ink: Color(0xFF8E929A),
+    body: Color(0xFFF7F7F5),
+    screenOn: Color(0xFFDDE7EF),
+    screenOff: Color(0xFF6B7682),
+    screenInk: Color(0xFF1B2733),
+    screenDim: Color(0xFF5B6F82),
+    me: Color(0xFF1F6FD1),
+    them: Color(0xFF1B2733),
+    keyBg: Color(0xFFFFFFFF),
+    keyInk: Color(0xFF3A3C42),
+    keySub: Color(0xFF8E929A),
+    softBg: Color(0xFFE6E7EA),
+    softInk: Color(0xFF3A3C42),
+    focus: Color(0xFF3B82F6),
+    splash: 'aim',
+    sendHint: 'return ⏎ sends',
+  ),
+  PhoneTheme(
+    id: 'pocketbrick',
+    name: 'Pocket Brick',
+    blurb: 'Chunky green-screen handheld',
+    device: Device.pocketBrick,
+    ink: Color(0xFF2B2A2E),
+    body: Color(0xFFCBC7BD),
+    screenOn: Color(0xFF9BBC0F),
+    screenOff: Color(0xFF7B8650),
+    screenInk: Color(0xFF0F380F),
+    screenDim: Color(0xFF306230),
+    me: Color(0xFF0F380F),
+    them: Color(0xFF306230),
+    mono: true,
+    keyBg: Color(0xFFC4CFA1),
+    keyInk: Color(0xFF0F380F),
+    keySub: Color(0xFF306230),
+    softBg: Color(0xFF9A2257),
+    softInk: Color(0xFFFFFFFF),
+    focus: Color(0xFF0F380F),
+    splash: 'AIM',
+    sendHint: 'START or ED sends',
   ),
 ];
 
