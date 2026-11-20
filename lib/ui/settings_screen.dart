@@ -166,7 +166,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     'and you can drag it around.',
                     style: TextStyle(fontSize: 12)),
                 const SizedBox(height: 6),
-                const Text('Phone or gadget'),
+                const Text('Phone or gadget (default; each chat can pick its own with the keyboard button in its title bar)'),
                 const Text(
                     'Wide Flip is a keypad phone that opens sideways to a keyboard. Console TV, Pocket Mail, '
                     'Music Player and Pocket Brick always use their own keyboard. Arrows / D-pad move between keys, A presses.',

@@ -15,6 +15,7 @@ import 'retro.dart';
 import 'color_picker.dart';
 import 'retro_text_field.dart';
 import 't9_phone.dart';
+import 'keyboard_picker.dart';
 import 'wallpaper.dart';
 
 /// One conversation, laid out like a texting app inside a classic IM window.
@@ -136,6 +137,8 @@ class _ChatPaneState extends State<ChatPane> {
         _titleIcon(Icons.format_color_text, 'My text colours', _pickColors),
         const SizedBox(width: 3),
         _titleIcon(Icons.wallpaper, 'Wallpaper (only you see it)', _pickWallpaper),
+        const SizedBox(width: 3),
+        _titleIcon(Icons.keyboard, 'Keyboard for this chat', _pickKeyboard),
         const SizedBox(width: 4),
       ],
       padding: const EdgeInsets.all(4),
@@ -236,6 +239,7 @@ class _ChatPaneState extends State<ChatPane> {
             OskLine(l.mine ? 'me' : l.from, l.text, l.mine),
         ],
         oskPreviewListen: _app,
+        oskChat: widget.screenName,
         onChanged: _onChanged,
         onSubmitted: (_) => _send(),
       );
@@ -361,6 +365,17 @@ class _ChatPaneState extends State<ChatPane> {
         current: s.wallpaperFor(widget.screenName), allowDefault: s.wallpaperOverride(widget.screenName) != null);
     if (r == null) return;
     s.setWallpaperFor(widget.screenName, r == '*' ? null : r);
+  }
+
+  Future<void> _pickKeyboard() async {
+    final s = context.read<AppSettings>();
+    final r = await pickKeyboard(context,
+        style: s.phoneStyleFor(widget.screenName),
+        kind: s.keyboardKindFor(widget.screenName),
+        name: context.read<AppState>().conversationFor(widget.screenName).displayName,
+        allowDefault: s.keyboardOverride(widget.screenName) != null);
+    if (r == null) return;
+    s.setKeyboardFor(widget.screenName, r.$1, kind: r.$2);
   }
 
   Future<void> _pickColors() async {
