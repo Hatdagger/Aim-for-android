@@ -143,20 +143,30 @@ jobs:
     needs: [android, linux, windows]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v5
         with:
           path: dist
           merge-multiple: true
       - name: Publish "latest" release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: latest
-          name: Latest build
-          prerelease: true
-          make_latest: true
-          body: |
-            Automatic build of ${{ github.sha }}.
-            - Android: aim-android.apk (allow installing from unknown sources)
-            - Windows: aim-windows.zip (unzip, run aim_for_android.exe)
-            - Linux / Steam Deck: aim-linux.tar.gz (extract, run bundle/aim_for_android)
-          files: dist/*
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          ls -la dist
+          cat > notes.md <<'NOTES'
+          Automatic build of the latest code.
+          - Android: aim-android.apk (allow installing from unknown sources)
+          - Windows: aim-windows.zip (unzip, run aim_for_android.exe)
+          - Linux / Steam Deck: aim-linux.tar.gz (extract, run bundle/aim_for_android)
+          NOTES
+          gh release delete latest -R "$REPO" --cleanup-tag -y || true
+          for attempt in 1 2 3 4; do
+            if gh release view latest -R "$REPO" >/dev/null 2>&1; then
+              gh release upload latest dist/* -R "$REPO" --clobber && exit 0
+            else
+              gh release create latest dist/* -R "$REPO" --target "$GITHUB_SHA" \
+                --prerelease --title "Latest build" --notes-file notes.md && exit 0
+            fi
+            echo "upload failed, retrying in 15s"; sleep 15
+          done
+          exit 1
