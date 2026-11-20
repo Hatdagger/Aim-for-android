@@ -49,7 +49,7 @@ class _SetupWizardState extends State<SetupWizard> {
       _status = 'Unpacking sounds…';
       _progress = null;
     });
-    final sounds = await Isolate.run(() => AimInstallerImporter.extractSounds(bytes));
+    final sounds = await extractSoundsInBackground(bytes);
     final engine = context.read<AppState>().sounds;
     for (final e in sounds.entries) {
       await engine.saveSound(e.key, e.value);
@@ -247,3 +247,9 @@ class _SetupWizardState extends State<SetupWizard> {
     );
   }
 }
+
+/// Unpacks the installer on a background thread. This must be a top-level
+/// function: a closure made inside a widget method would drag the whole app
+/// state along to the background thread, which Dart refuses ("object is unsendable").
+Future<Map<String, Uint8List>> extractSoundsInBackground(Uint8List bytes) =>
+    Isolate.run(() => AimInstallerImporter.extractSounds(bytes));

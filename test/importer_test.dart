@@ -2,12 +2,17 @@ import 'dart:io';
 
 import 'package:aim_for_android/app/sounds.dart';
 import 'package:aim_for_android/importer/aim_installer.dart';
+import 'package:aim_for_android/ui/setup_wizard.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 /// Needs the real installer: set AIM_INSTALLER=/path/to/aim513036.exe.
 /// CI downloads it from archive.org; it is never committed.
 void main() {
   final path = Platform.environment['AIM_INSTALLER'];
+  test('setup wizard unpacks on a background thread without errors', () async {
+    final sounds = await extractSoundsInBackground(File(path!).readAsBytesSync());
+    expect(sounds.length, AimInstallerImporter.soundSha1.length);
+  }, skip: path == null ? 'AIM_INSTALLER not set' : false);
   test('extracts all 13 classic sounds from aim513036.exe', () {
     final bytes = File(path!).readAsBytesSync();
     final sounds = AimInstallerImporter.extractSounds(bytes);
