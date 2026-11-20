@@ -78,6 +78,7 @@ jobs:
           flutter test --reporter expanded 2>&1 | tee "$RUNNER_TEMP/test.log"
 
       - name: Phone/gadget pictures (PNGs on the previews/<branch> branch)
+        if: ${{ !cancelled() }}
         continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
