@@ -108,7 +108,7 @@ void main() {
   testWidgets('gadget keyboards type and send', (tester) async {
     for (final (id, letter, sendLabel) in const [
       ('pocketbrick', 'a', 'ED'),
-      ('dashboard', 'a', 'DONE'),
+      ('dashboard', 'a', 'Done'),
       ('musicplayer', 'g', 'return'),
       ('pocketmail', 'g', '⏎'),
     ]) {
