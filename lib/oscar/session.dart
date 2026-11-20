@@ -586,6 +586,83 @@ class OscarSession {
     _emit(BuddyListChanged());
   }
 
+  // ---------------------------------------------------------------- block / warn
+
+  bool isBlocked(String sn) {
+    final key = normalizeSn(sn);
+    return feedbag.any((i) => i.classId == FeedbagItem.classDeny && normalizeSn(i.name) == key);
+  }
+
+  bool isBuddy(String sn) {
+    final key = normalizeSn(sn);
+    return feedbag.any((i) => i.classId == FeedbagItem.classBuddy && normalizeSn(i.name) == key);
+  }
+
+  /// Blocks [sn] like AIM does: a deny-list entry, plus privacy mode
+  /// "block the users on my block list" so the server enforces it.
+  Future<void> block(String sn) async {
+    if (isBlocked(sn)) return;
+    final iid = _freeId((id) => feedbag.any((i) => i.groupId == 0 && i.itemId == id));
+    final deny = FeedbagItem(sn, 0, iid, FeedbagItem.classDeny, []);
+    const denySome = 0x04;
+    final modeTlv = Tlv(0x00ca, Uint8List.fromList([denySome]));
+    var pd = feedbag.where((i) => i.classId == FeedbagItem.classPdInfo).firstOrNull;
+    final newPd = pd == null;
+    final currentMode = pd?.attrs.where((t) => t.type == 0x00ca).firstOrNull?.value;
+    final needMode = currentMode == null || currentMode.isEmpty || currentMode[0] != denySome;
+    if (pd == null) {
+      final pid = _freeId((id) => id == iid || feedbag.any((i) => i.groupId == 0 && i.itemId == id));
+      pd = FeedbagItem('', 0, pid, FeedbagItem.classPdInfo, [modeTlv]);
+    } else if (needMode) {
+      pd.attrs = [...pd.attrs.where((t) => t.type != 0x00ca), modeTlv];
+    }
+    final p = pd;
+    await _feedbagEdit((bos) {
+      bos.sendSnac(0x0013, 0x0008, _items([deny]));
+      if (newPd) {
+        bos.sendSnac(0x0013, 0x0008, _items([p]));
+      } else if (needMode) {
+        bos.sendSnac(0x0013, 0x0009, _items([p]));
+      }
+    });
+    feedbag.add(deny);
+    if (newPd) feedbag.add(p);
+    _emit(BuddyListChanged());
+  }
+
+  Future<void> unblock(String sn) async {
+    final key = normalizeSn(sn);
+    final items = feedbag.where((i) => i.classId == FeedbagItem.classDeny && normalizeSn(i.name) == key).toList();
+    if (items.isEmpty) return;
+    await _feedbagEdit((bos) => bos.sendSnac(0x0013, 0x000a, _items(items)));
+    feedbag.removeWhere(items.contains);
+    _emit(BuddyListChanged());
+  }
+
+  /// Warns [sn] (raises their warning level). Returns their new level in
+  /// percent. The server only allows it after they've messaged you.
+  Future<int> warn(String sn, {bool anonymous = false}) async {
+    final bos = _requireBos();
+    final w = ByteWriter()
+      ..u16(anonymous ? 1 : 0)
+      ..u8(sn.length)
+      ..bytes(ascii.encode(sn));
+    final f = bos.expect(const [(0x0004, 0x0009), (0x0004, 0x0001)], timeout: const Duration(seconds: 15));
+    bos.sendSnac(0x0004, 0x0008, w.toBytes());
+    final reply = await f;
+    final r = reply.reader;
+    if (reply.subtype == 0x0001) {
+      final code = r.remaining >= 2 ? r.u16() : 0;
+      throw Exception(switch (code) {
+        0x0004 => '$sn isn\'t signed on (or one of you blocked the other).',
+        0x000d => 'You can only warn someone after they message you, and only a few times.',
+        _ => 'The server refused the warning (code 0x${code.toRadixString(16)}).',
+      });
+    }
+    r.u16(); // amount added
+    return ((r.remaining >= 2 ? r.u16() : 0) / 10).round();
+  }
+
   // ---------------------------------------------------------------- messaging
 
   FlapConnection _requireBos() {

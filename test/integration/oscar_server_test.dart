@@ -176,4 +176,44 @@ void main() {
     await a.dispose();
     await b.dispose();
   }, skip: skip, timeout: t);
+
+  test('warn, block (buddy sees you go offline) and unblock', () async {
+    final b = _client('bob');
+    final c = _client('carol');
+    b.start();
+    c.start();
+    await _online(b);
+    await _online(c);
+
+    // bob watches carol
+    bool carolIs(OscarEvent e, Type t) =>
+        (e is BuddyArrived && t == BuddyArrived && normalizeSn(e.info.screenName) == 'carol') ||
+        (e is BuddyDeparted && t == BuddyDeparted && normalizeSn(e.screenName) == 'carol');
+    if (!b.session!.isBuddy('carol')) {
+      await b.session!.addBuddy('carol', 'Buddies');
+    }
+    await Future<void>.delayed(const Duration(seconds: 1));
+
+    // warn needs a message from bob first
+    final got = _nextMessage(c);
+    b.send('carol', 'spam spam');
+    await got;
+    final level = await c.session!.warn('bob');
+    expect(level, greaterThan(0));
+
+    // block: bob sees carol leave
+    final left = b.events.firstWhere((e) => e is SessionEvent && carolIs(e.event, BuddyDeparted));
+    await c.session!.block('bob');
+    expect(c.session!.isBlocked('bob'), isTrue);
+    await left.timeout(const Duration(seconds: 15));
+
+    // unblock: carol comes back
+    final back = b.events.firstWhere((e) => e is SessionEvent && carolIs(e.event, BuddyArrived));
+    await c.session!.unblock('bob');
+    expect(c.session!.isBlocked('bob'), isFalse);
+    await back.timeout(const Duration(seconds: 15));
+
+    await b.dispose();
+    await c.dispose();
+  }, skip: skip, timeout: t);
 }

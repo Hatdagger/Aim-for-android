@@ -376,6 +376,23 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
+  bool isBlocked(String sn) => client?.session?.isBlocked(sn) ?? false;
+  bool isBuddy(String sn) => client?.session?.isBuddy(sn) ?? false;
+
+  Future<void> setBlocked(String sn, bool blocked) async {
+    final s = client?.session;
+    if (s == null || !s.isOnline) throw Exception('Not signed on');
+    blocked ? await s.block(sn) : await s.unblock(sn);
+    notifyListeners();
+  }
+
+  /// Returns the buddy's new warning level (percent).
+  Future<int> warn(String sn, {bool anonymous = false}) async {
+    final s = client?.session;
+    if (s == null || !s.isOnline) throw Exception('Not signed on');
+    return s.warn(sn, anonymous: anonymous);
+  }
+
   // --------------------------------------------------------------- icons
 
   Uint8List? get myIcon {

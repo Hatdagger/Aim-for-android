@@ -119,6 +119,7 @@ class _ChatPaneState extends State<ChatPane> {
         : (info?.isAway ?? false)
             ? 'Away'
             : (info != null && info.idleMinutes > 0 ? 'Idle ${info.idleMinutes} min' : 'Online');
+    final warnPct = ((info?.warningLevel ?? 0) / 10).round();
     final lines = conv.lines;
     if (lines.length != _lastCount) {
       _lastCount = lines.length;
@@ -140,7 +141,7 @@ class _ChatPaneState extends State<ChatPane> {
               Expanded(
                 child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                   Text(conv.displayName, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-                  Text(status, style: const TextStyle(fontSize: 12)),
+                  Text(warnPct > 0 ? '$status · Warning level $warnPct%' : status, style: const TextStyle(fontSize: 12)),
                 ]),
               ),
               const Icon(Icons.info_outline),
@@ -173,26 +174,126 @@ class _ChatPaneState extends State<ChatPane> {
             ),
           ),
           const SizedBox(height: 4),
-          Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
-            Expanded(
-              child: RetroTextField(
-                controller: _input,
-                hint: 'Message ${conv.displayName}',
-                minLines: 1,
-                maxLines: 4,
-                enterSubmits: true,
-                action: TextInputAction.send,
-                doneLabel: 'Send',
-                onChanged: _onChanged,
-                onSubmitted: (_) => _send(),
-              ),
-            ),
-            const SizedBox(width: 4),
-            RetroButton(minWidth: 64, onPressed: _send, child: const Text('Send')),
-          ]),
+          RetroTextField(
+            controller: _input,
+            hint: 'Message ${conv.displayName}',
+            minLines: 1,
+            maxLines: 4,
+            enterSubmits: true,
+            action: TextInputAction.send,
+            doneLabel: 'Send',
+            onChanged: _onChanged,
+            onSubmitted: (_) => _send(),
+          ),
+          const SizedBox(height: 4),
+          _actionBar(app, conv.displayName),
         ],
       ),
     );
+  }
+
+  // ---------------------------------------------------------------- AIM button bar
+
+  /// The row under the message box, like AIM 5:
+  /// Warn · Block · Add Buddy · Talk · Get Info · Send.
+  Widget _actionBar(AppState app, String name) {
+    final signedOn = app.link == LinkState.online;
+    final blocked = app.isBlocked(widget.screenName);
+    final buddy = app.isBuddy(widget.screenName);
+    return Row(children: [
+      _barButton(Icons.warning_amber_rounded, 'Warn', signedOn ? () => _warn(name) : null),
+      _barButton(blocked ? Icons.lock_open : Icons.block, blocked ? 'Unblock' : 'Block',
+          signedOn ? () => _block(name, !blocked) : null),
+      _barButton(Icons.person_add_alt_1, 'Add Buddy', signedOn && !buddy ? () => _addBuddy(name) : null),
+      _barButton(Icons.phone_in_talk, 'Talk', null), // voice isn't supported (yet)
+      _barButton(Icons.info_outline, 'Get Info', () => Navigator.of(context)
+          .push(MaterialPageRoute(builder: (_) => ProfileScreen(screenName: widget.screenName)))),
+      const SizedBox(width: 4),
+      RetroButton(
+        minWidth: 64,
+        minHeight: 48,
+        isDefault: true,
+        onPressed: _send,
+        child: const Column(mainAxisSize: MainAxisSize.min, children: [
+          Icon(Icons.send, size: 20),
+          Text('Send', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+        ]),
+      ),
+    ]);
+  }
+
+  Widget _barButton(IconData icon, String label, VoidCallback? onPressed) {
+    final color = onPressed == null ? Retro.shadow : Colors.black;
+    return Expanded(
+      child: Padding(
+        padding: const EdgeInsets.only(right: 2),
+        child: RetroButton(
+          minWidth: 0,
+          minHeight: 48,
+          padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 4),
+          semanticLabel: label,
+          onPressed: onPressed,
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            Icon(icon, size: 20, color: color),
+            FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Text(label, maxLines: 1, style: TextStyle(fontSize: 11, color: color)),
+            ),
+          ]),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _warn(String name) async {
+    final anon = await showRetroDialog<bool>(context, title: 'Warn $name', builder: (ctx) {
+      return Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        Text('Warning $name raises their warning level and slows down how fast they can send messages. '
+            'Use it on people who are bothering you.'),
+        const SizedBox(height: 10),
+        RetroButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Warn')),
+        const SizedBox(height: 6),
+        RetroButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Warn anonymously')),
+        const SizedBox(height: 6),
+        RetroButton(autofocus: true, onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+      ]);
+    });
+    if (anon == null || !mounted) return;
+    try {
+      final level = await _app.warn(widget.screenName, anonymous: anon);
+      if (mounted) showRetroMessage(context, 'Warn', '$name has been warned. Their warning level is now $level%.');
+    } catch (e) {
+      if (mounted) showRetroMessage(context, 'Warn', '$e'.replaceFirst('Exception: ', ''));
+    }
+  }
+
+  Future<void> _block(String name, bool block) async {
+    if (block) {
+      final ok = await showRetroDialog<bool>(context, title: 'Block $name', builder: (ctx) {
+        return Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          Text('$name won\'t be able to see when you\'re online or send you messages. You can unblock them here later.'),
+          const SizedBox(height: 10),
+          RetroButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Block')),
+          const SizedBox(height: 6),
+          RetroButton(autofocus: true, onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+        ]);
+      });
+      if (ok != true || !mounted) return;
+    }
+    try {
+      await _app.setBlocked(widget.screenName, block);
+    } catch (e) {
+      if (mounted) showRetroMessage(context, block ? 'Block' : 'Unblock', '$e'.replaceFirst('Exception: ', ''));
+    }
+  }
+
+  Future<void> _addBuddy(String name) async {
+    try {
+      await _app.addBuddy(widget.screenName, 'Buddies');
+      if (mounted) showRetroMessage(context, 'Add Buddy', '$name was added to your Buddies group.');
+    } catch (e) {
+      if (mounted) showRetroMessage(context, 'Add Buddy', 'Could not add buddy: $e');
+    }
   }
 
   Widget _bubble(AppState app, ChatLine l) {
