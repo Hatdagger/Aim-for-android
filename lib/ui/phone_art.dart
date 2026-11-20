@@ -78,7 +78,7 @@ class PhoneArt extends StatelessWidget {
   });
 
   static Size sizeFor(PhoneTheme t, bool qwerty) =>
-      qwerty ? const Size(840, 720) : (t.flip ? const Size(470, 830) : const Size(470, 790));
+      qwerty ? const Size(840, 720) : (t.flip ? const Size(470, 950) : const Size(470, 790));
 
   @override
   Widget build(BuildContext context) {
@@ -240,7 +240,8 @@ class PhoneArt extends StatelessWidget {
   // ------------------------------------------------------------ flip
 
   Widget _flip() {
-    const left = 14.0, w = 400.0, top = 60.0, lidH = 300.0, hingeH = 24.0, baseH = 430.0;
+    // Lid and keypad half are the same size, so the closed lid covers the keys exactly.
+    const left = 14.0, w = 400.0, top = 60.0, lidH = 420.0, hingeH = 24.0, baseH = 420.0;
     const baseTop = top + lidH + hingeH;
     final angle = (1 - open) * pi; // 0 = open, pi = folded down over the keys
     final showBack = angle > pi / 2;
@@ -251,7 +252,7 @@ class PhoneArt extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(22, 26, 22, 22),
       child: Stack(children: [
         if (t.rhinestones) Positioned.fill(child: CustomPaint(painter: RhinestonePainter(t.ink))),
-        Center(child: _screenBox(height: 236, width: w - 44 - (t.rhinestones ? 28 : 0))),
+        Center(child: _screenBox(height: 340, width: w - 44 - (t.rhinestones ? 28 : 0))),
       ]),
     );
     final lidBack = ShellBox(

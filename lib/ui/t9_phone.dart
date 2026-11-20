@@ -1,4 +1,5 @@
 import 'dart:math';
+import 'dart:ui' show ImageFilter;
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
@@ -174,17 +175,19 @@ class _OskHostState extends State<OskHost> {
         }
         return Stack(children: [
           Positioned.fill(child: widget.child),
-          const Positioned.fill(child: ColoredBox(color: Retro.desktop)),
+          // Chat hidden behind a heavy blur + tint (the phone's screen shows it).
+          const Positioned.fill(child: _Backdrop(sigma: 22, tint: Color(0xB3101820))),
           Positioned(left: (W - w) / 2, top: top + (H - top - pad - h) / 2, width: w, height: h, child: phone),
           Positioned(left: 8, top: 8, child: SafeArea(child: fullToggle(true))),
         ]);
       }
 
       if (!landscape) {
-        var w = qwerty ? W : min(W * 0.98, H * 0.66 * aspect);
+        // Tall phones may take up most of the screen; the chat behind is blurred.
+        var w = qwerty ? W : min(W * 0.98, H * 0.9 * aspect);
         var h = w / aspect;
-        if (h > H * 0.72) {
-          h = H * 0.72;
+        if (h > H * 0.9) {
+          h = H * 0.9;
           w = h * aspect;
         }
         return Stack(children: [
@@ -192,7 +195,7 @@ class _OskHostState extends State<OskHost> {
           Positioned.fill(
             child: GestureDetector(
               onTap: () => osk.close(),
-              child: const ColoredBox(color: Color(0x66000000)),
+              child: const _Backdrop(sigma: 6, tint: Color(0x66000000)),
             ),
           ),
           Positioned(left: (W - w) / 2, width: w, bottom: 0, height: h, child: SafeArea(top: false, child: phone)),
@@ -297,6 +300,21 @@ class _OskHostState extends State<OskHost> {
 /// Registered before the app starts so it sees Back first: while the phone
 /// keyboard is open, Back closes it (showing the chat); the next Back then
 /// leaves the chat as usual.
+/// Blurs and tints whatever is behind it.
+class _Backdrop extends StatelessWidget {
+  final double sigma;
+  final Color tint;
+  const _Backdrop({required this.sigma, required this.tint});
+
+  @override
+  Widget build(BuildContext context) => ClipRect(
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: sigma, sigmaY: sigma),
+          child: ColoredBox(color: tint),
+        ),
+      );
+}
+
 class OskBackObserver with WidgetsBindingObserver {
   final OskController osk;
   OskBackObserver(this.osk);
