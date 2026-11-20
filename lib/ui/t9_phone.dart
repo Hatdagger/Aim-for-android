@@ -151,7 +151,7 @@ class OskHost extends StatelessWidget {
       }
       return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
         Expanded(child: child),
-        SizedBox(height: (c.maxHeight * 0.5).clamp(300.0, 430.0).toDouble(), child: phone),
+        SizedBox(height: (c.maxHeight * 0.42).clamp(200.0, 290.0).toDouble(), child: phone),
       ]);
     });
   }
@@ -257,32 +257,25 @@ class _T9PhoneState extends State<T9Phone> {
       node: _scope,
       child: LayoutBuilder(builder: (ctx, c) {
         final keyH = widget.compact ? 40.0 : 46.0;
+        // Just the keypad for now (no phone screen, no scrolling): it shrinks
+        // to fit the space it's given instead.
         return Center(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.all(8),
-            child: ConstrainedBox(
-              constraints: BoxConstraints(maxWidth: widget.compact ? 420 : 300),
-              child: Column(mainAxisSize: MainAxisSize.min, children: [
-                if (style.antenna)
-                  Align(
-                    alignment: const Alignment(0.6, 0),
-                    child: Container(width: 14, height: 34, decoration: BoxDecoration(color: style.body.last, borderRadius: BorderRadius.circular(6))),
-                  ),
-                Container(
-                  padding: const EdgeInsets.fromLTRB(14, 14, 14, 18),
+          child: Padding(
+            padding: const EdgeInsets.all(6),
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              child: SizedBox(
+                width: widget.compact ? 420 : 300,
+                child: Container(
+                  padding: const EdgeInsets.fromLTRB(10, 10, 10, 10),
                   decoration: BoxDecoration(
                     gradient: LinearGradient(colors: style.body, begin: Alignment.topLeft, end: Alignment.bottomRight),
-                    borderRadius: BorderRadius.circular(style.radius),
-                    boxShadow: const [BoxShadow(color: Color(0x66000000), blurRadius: 10, offset: Offset(3, 5))],
+                    borderRadius: BorderRadius.circular(14),
+                    boxShadow: const [BoxShadow(color: Color(0x66000000), blurRadius: 8, offset: Offset(2, 4))],
                   ),
                   child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-                    _screen(style),
-                    if (style.flip)
-                      Container(height: 14, margin: const EdgeInsets.symmetric(vertical: 8), decoration: BoxDecoration(color: style.accent, borderRadius: BorderRadius.circular(7))),
-                    if (style.slider) Container(height: 3, margin: const EdgeInsets.symmetric(vertical: 8), color: style.accent),
-                    if (!style.flip && !style.slider) const SizedBox(height: 10),
                     _softKeys(style),
-                    const SizedBox(height: 8),
+                    const SizedBox(height: 6),
                     for (final row in const [
                       ['1', '2', '3'],
                       ['4', '5', '6'],
@@ -292,9 +285,7 @@ class _T9PhoneState extends State<T9Phone> {
                       Row(children: [for (final k in row) Expanded(child: _key(style, k, keyH))]),
                   ]),
                 ),
-                const SizedBox(height: 6),
-                _styleRow(),
-              ]),
+              ),
             ),
           ),
         );
@@ -302,6 +293,8 @@ class _T9PhoneState extends State<T9Phone> {
     );
   }
 
+  // Phone screen and style picker: kept for the keyboard rework.
+  // ignore: unused_element
   Widget _screen(PhoneStyle s) {
     final e = _engine;
     final text = widget.request.obscure ? '•' * widget.request.controller.text.length : e.text;
@@ -383,6 +376,7 @@ class _T9PhoneState extends State<T9Phone> {
     );
   }
 
+  // ignore: unused_element
   Widget _styleRow() {
     final current = context.watch<AppSettings>().phoneStyle;
     return Wrap(alignment: WrapAlignment.center, spacing: 4, runSpacing: 4, children: [
