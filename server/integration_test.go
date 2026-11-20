@@ -269,8 +269,26 @@ func TestIntegration(t *testing.T) {
 	if err := CheckPassword(addr, "Flood A", "secret12"); err != nil {
 		t.Fatalf("approved account should sign on: %v", err)
 	}
+
+	// each client address gets its own sign-on allowance through the router
+	limited := false
+	for i := 0; i < 14 && !limited; i++ {
+		limited = errors.Is(CheckPassword(addr, "newkid", "secret12"), ErrTooFast)
+	}
+	if !limited {
+		t.Fatal("expected 127.0.0.1 to hit the server's sign-on limit")
+	}
+	if err := CheckPasswordFrom(net.ParseIP("203.0.113.9"), app.internal(0), "newkid", "secret12"); err != nil {
+		t.Fatalf("another address should have its own allowance: %v", err)
+	}
+	if got := RealAddr(LoopbackFor(net.ParseIP("203.0.113.9")).String()); got != "203.0.113.9" {
+		t.Fatalf("panel mapping: %q", got)
+	}
 }
 
 type x509Cert = x509.Certificate
 
-func md5sum(b []byte) []byte { h := md5.Sum(b); return h[:] }
+func md5sum(b []byte) []byte {
+	h := md5.Sum(b)
+	return h[:]
+}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -221,10 +222,12 @@ func (a *App) handleCreateInvite(w http.ResponseWriter, r *http.Request) {
 	a.mu.Lock()
 	lanAddr := a.ocfg.LANListen
 	a.mu.Unlock()
-	if err := CheckPassword(lanAddr, sn, req.Password); err != nil {
+	if err := CheckPasswordFrom(net.ParseIP(ip), lanAddr, sn, req.Password); err != nil {
 		switch {
 		case errors.Is(err, ErrSuspended):
 			apiErr(w, 403, "banned", "This account is suspended.")
+		case errors.Is(err, ErrTooFast):
+			apiErr(w, 429, "rate_limited", "Too many sign-on attempts. Wait a minute and try again.")
 		case errors.Is(err, ErrBadLogin):
 			a.Store.Read(func(d *StoreData) {
 				d.FailedLogins = append(d.FailedLogins, &Mark{Kind: "ip", Value: ip, At: now})

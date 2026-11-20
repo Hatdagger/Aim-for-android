@@ -21,13 +21,20 @@ import (
 var (
 	ErrBadLogin  = errors.New("incorrect screen name or password")
 	ErrSuspended = errors.New("this account is suspended")
+	ErrTooFast   = errors.New("signing on too often; wait a minute")
 )
 
 // CheckPassword asks Open OSCAR Server whether the screen name and password
 // are right, using the same MD5 sign-on an AIM 5.x client uses. It stops after
 // the password step, so nobody is actually signed on.
 func CheckPassword(addr, screenName, password string) error {
-	c, err := net.DialTimeout("tcp", addr, 5*time.Second)
+	return CheckPasswordFrom(nil, addr, screenName, password)
+}
+
+// CheckPasswordFrom is CheckPassword on behalf of a client at real (so the
+// server's sign-on limit counts that client, not this app).
+func CheckPasswordFrom(real net.IP, addr, screenName, password string) error {
+	c, err := DialFrom(real, addr)
 	if err != nil {
 		return err
 	}
@@ -135,6 +142,8 @@ func loginErr(sub uint16, body []byte) error {
 		switch binary.BigEndian.Uint16(e) {
 		case 0x11:
 			return ErrSuspended
+		case 0x18, 0x1d: // 0x1d: Open OSCAR Server's per-address sign-on limit
+			return ErrTooFast
 		default:
 			return ErrBadLogin
 		}

@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"crypto/tls"
 	"errors"
+	"hash/fnv"
 	"io"
 	"net"
 	"sync"
@@ -127,11 +128,12 @@ func (r *Router) handle(c net.Conn) {
 
 func (r *Router) proxyOSCAR(c *peekedConn) {
 	defer c.Close()
-	target := r.Backend(remoteIP(c.RemoteAddr()))
+	real := remoteIP(c.RemoteAddr())
+	target := r.Backend(real)
 	if target == "" {
 		return
 	}
-	b, err := net.DialTimeout("tcp", target, 5*time.Second)
+	b, err := DialFrom(real, target)
 	if err != nil {
 		return
 	}
@@ -205,3 +207,57 @@ func (l *chanListener) Close() error {
 }
 
 func (l *chanListener) Addr() net.Addr { return l.addr }
+
+// Open OSCAR Server limits sign-ons per source address (10 quickly, then about
+// one a minute). Everything reaches it through this router, so without help
+// every user would share one allowance. Each real client address therefore
+// connects from its own loopback address (127.x.y.z — the whole 127/8 range
+// works on Linux and Windows), and the panel maps them back.
+
+var (
+	loopMu  sync.Mutex
+	loopMap = map[string]string{} // loopback -> real address
+)
+
+// LoopbackFor picks the 127.x.y.z address used for a real client address.
+func LoopbackFor(real net.IP) net.IP {
+	if real == nil || real.IsLoopback() {
+		return net.IPv4(127, 0, 0, 1).To4()
+	}
+	h := fnv.New32a()
+	h.Write(real.To16())
+	v := h.Sum32()
+	ip := net.IPv4(127, byte(v>>16), byte(v>>8), byte(v)).To4()
+	if (ip[1] == 0 && ip[2] == 0 && ip[3] <= 1) || (ip[1] == 255 && ip[2] == 255 && ip[3] == 255) {
+		ip[3] = 2
+	}
+	return ip
+}
+
+// RealAddr turns a loopback address seen by Open OSCAR Server back into the
+// client's real address ("" if unknown).
+func RealAddr(loop string) string {
+	loopMu.Lock()
+	defer loopMu.Unlock()
+	return loopMap[loop]
+}
+
+// DialFrom connects to the server program from the loopback address assigned
+// to real (or plainly, if this computer won't allow that address).
+func DialFrom(real net.IP, target string) (net.Conn, error) {
+	src := LoopbackFor(real)
+	if !src.Equal(net.IPv4(127, 0, 0, 1)) {
+		d := net.Dialer{Timeout: 5 * time.Second, LocalAddr: &net.TCPAddr{IP: src}}
+		if c, err := d.Dial("tcp", target); err == nil {
+			loopMu.Lock()
+			if len(loopMap) > 20000 {
+				loopMap = map[string]string{}
+			}
+			loopMap[src.String()] = real.String()
+			loopMu.Unlock()
+			return c, nil
+		}
+		// e.g. macOS, where only 127.0.0.1 exists: fall through to a plain dial
+	}
+	return net.DialTimeout("tcp", target, 5*time.Second)
+}

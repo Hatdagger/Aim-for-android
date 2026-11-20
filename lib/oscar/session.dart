@@ -278,6 +278,7 @@ class OscarSession {
       case 0x0011:
         return const OscarDisconnect(DisconnectKind.badPassword, 'This account is suspended.');
       case 0x0018:
+      case 0x001d: // Open OSCAR Server: too many sign-ons from this address
         return const OscarDisconnect(
             DisconnectKind.rateLimited, 'Connecting too frequently. Waiting before trying again.');
       case 0x001c:

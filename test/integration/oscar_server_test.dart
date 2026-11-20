@@ -22,11 +22,11 @@ AimClient _client(String sn, {String pw = _pw}) => AimClient(
       backoff: const [Duration(milliseconds: 300), Duration(seconds: 1)],
     );
 
-Future<void> _online(AimClient c) async {
+Future<void> _online(AimClient c, {Duration wait = const Duration(seconds: 30)}) async {
   if (c.isOnline) return;
   await c.events
       .firstWhere((e) => e is LinkStateChanged && (e.state == LinkState.online || e.state == LinkState.stopped))
-      .timeout(const Duration(seconds: 30));
+      .timeout(wait);
   if (!c.isOnline) fail('${c.screenName} did not sign on: ${c.lastMessage}');
 }
 
@@ -182,11 +182,13 @@ void main() {
     final c = _client('erin');
     b.start();
     c.start();
-    await _online(b);
-    await _online(c);
+    // The server allows ~10 quick sign-ons per address; earlier tests use them
+    // up, so these may wait for its one-minute window.
+    await _online(b, wait: const Duration(seconds: 100));
+    await _online(c, wait: const Duration(seconds: 100));
 
-    // bob watches carol
-    bool carolIs(OscarEvent e, Type t) =>
+    // dave watches erin
+    bool erinIs(OscarEvent e, Type t) =>
         (e is BuddyArrived && t == BuddyArrived && normalizeSn(e.info.screenName) == 'erin') ||
         (e is BuddyDeparted && t == BuddyDeparted && normalizeSn(e.screenName) == 'erin');
     if (!b.session!.isBuddy('erin')) {
@@ -194,26 +196,26 @@ void main() {
     }
     await Future<void>.delayed(const Duration(seconds: 1));
 
-    // warn needs a message from bob first
+    // warn needs a message from dave first
     final got = _nextMessage(c);
     b.send('erin', 'spam spam');
     await got;
     final level = await c.session!.warn('dave');
     expect(level, greaterThan(0));
 
-    // block: bob sees carol leave
-    final left = b.events.firstWhere((e) => e is SessionEvent && carolIs(e.event, BuddyDeparted));
+    // block: dave sees erin leave
+    final left = b.events.firstWhere((e) => e is SessionEvent && erinIs(e.event, BuddyDeparted));
     await c.session!.block('dave');
     expect(c.session!.isBlocked('dave'), isTrue);
     await left.timeout(const Duration(seconds: 15));
 
-    // unblock: carol comes back
-    final back = b.events.firstWhere((e) => e is SessionEvent && carolIs(e.event, BuddyArrived));
+    // unblock: erin comes back
+    final back = b.events.firstWhere((e) => e is SessionEvent && erinIs(e.event, BuddyArrived));
     await c.session!.unblock('dave');
     expect(c.session!.isBlocked('dave'), isFalse);
     await back.timeout(const Duration(seconds: 15));
 
     await b.dispose();
     await c.dispose();
-  }, skip: skip, timeout: t);
+  }, skip: skip, timeout: const Timeout(Duration(minutes: 4)));
 }

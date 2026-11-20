@@ -456,6 +456,13 @@ func (p *Panel) online(*http.Request) (any, error) {
 	if err != nil {
 		return nil, err
 	}
+	for i := range ss {
+		for j := range ss[i].Instances {
+			if real := RealAddr(ss[i].Instances[j].RemoteAddr); real != "" {
+				ss[i].Instances[j].RemoteAddr = real
+			}
+		}
+	}
 	rooms, _ := m.Rooms(c)
 	if ss == nil {
 		ss = []MgmtSession{}
