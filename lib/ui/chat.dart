@@ -145,7 +145,10 @@ class _ChatPaneState extends State<ChatPane> {
       // Short windows (phones and handhelds held sideways) get a slim layout:
       // AIM buttons as small icons in the header, Send beside the message box.
       child: LayoutBuilder(builder: (ctx, box) {
-        final compact = box.maxHeight < 520;
+        // Judge the height without the on-screen keyboard: otherwise opening
+        // the keyboard would switch layouts, rebuild the message box and close
+        // the keyboard again.
+        final compact = box.maxHeight + MediaQuery.viewInsetsOf(context).bottom < 520;
         return Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -226,7 +229,11 @@ class _ChatPaneState extends State<ChatPane> {
     );
   }
 
-  Widget _inputField(String name, {int maxLines = 4}) => RetroTextField(
+  /// Keeps the message box (and its keyboard focus) the same widget when the
+  /// layout changes between slim and full.
+  final _inputKey = GlobalKey(debugLabel: 'message box');
+
+  Widget _inputField(String name, {int maxLines = 4}) => KeyedSubtree(key: _inputKey, child: RetroTextField(
         controller: _input,
         hint: 'Message $name',
         minLines: 1,
@@ -242,7 +249,7 @@ class _ChatPaneState extends State<ChatPane> {
         oskChat: widget.screenName,
         onChanged: _onChanged,
         onSubmitted: (_) => _send(),
-      );
+      ));
 
   /// One-line buddy header with AIM's Warn/Block/Add/Talk/Info as small icons.
   Widget _compactHeader(AppState app, String name, String key, bool online, String status) {
