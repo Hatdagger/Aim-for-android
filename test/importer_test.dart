@@ -13,6 +13,22 @@ void main() {
     expect(sounds.keys.toSet(), AimInstallerImporter.soundSha1.keys.toSet());
     for (final e in sounds.entries) {
       expect(AimInstallerImporter.sha1Hex(e.value), AimInstallerImporter.soundSha1[e.key], reason: e.key);
+      // Report each sound's WAV format (shows as a CI annotation).
+      final b = e.value;
+      String fmt = 'no fmt chunk';
+      for (var i = 12; i + 8 <= b.length;) {
+        final id = String.fromCharCodes(b.sublist(i, i + 4));
+        final len = b[i + 4] | b[i + 5] << 8 | b[i + 6] << 16 | b[i + 7] << 24;
+        if (id == 'fmt ') {
+          int u16(int o) => b[i + 8 + o] | b[i + 9 + o] << 8;
+          final rate = b[i + 12] | b[i + 13] << 8 | b[i + 14] << 16 | b[i + 15] << 24;
+          fmt = 'tag=0x${u16(0).toRadixString(16)} ch=${u16(2)} rate=$rate bits=${u16(14)} fmtlen=$len';
+          break;
+        }
+        i += 8 + len + (len & 1);
+      }
+      // ignore: avoid_print
+      print('::warning title=wav-format::${e.key} ${b.length} bytes ${String.fromCharCodes(b.sublist(0, 4))} $fmt');
     }
   }, skip: path == null ? 'AIM_INSTALLER not set' : false, timeout: const Timeout(Duration(minutes: 2)));
 
