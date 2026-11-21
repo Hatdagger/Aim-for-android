@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
 import '../app/input_mode.dart';
+import '../app/settings.dart';
 import 'retro.dart';
 import 't9_phone.dart';
 
@@ -53,7 +54,12 @@ class RetroTextField extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final pad = context.watch<InputMode>().controller;
+    final input = context.watch<InputMode>();
+    final s = input.settings;
+    // On Auto, a chat that has its own keyboard picked (title-bar ⌨) uses
+    // that phone/gadget even when typing by touch.
+    final pad = input.controller ||
+        (oskChat != null && s.controllerMode == ControllerMode.auto && s.keyboardOverride(oskChat!) != null);
     if (pad) {
       return ListenableBuilder(
         listenable: controller,

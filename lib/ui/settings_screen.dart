@@ -130,7 +130,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     style: TextStyle(fontSize: 12)),
               ]),
               _section('Controller', [
-                const Text('Controller mode uses the built-in on-screen keyboard and big focus highlights.'),
+                const Text('Controller mode uses the built-in on-screen keyboard and big focus highlights. '
+                    'On Auto, a chat where you picked a keyboard (⌨ in its title bar) always uses that phone or gadget.'),
                 const SizedBox(height: 4),
                 Wrap(spacing: 4, children: [
                   for (final m in ControllerMode.values)

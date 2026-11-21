@@ -43,7 +43,7 @@ Future<(String?, String)?> pickKeyboard(BuildContext context,
 
       return SingleChildScrollView(
         child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-          Text('Pick what pops up when you type to $name. Other chats keep their own.', style: const TextStyle(fontSize: 12)),
+          Text('Pick what pops up when you type to $name, even without a controller (unless Controller is set to Never). Other chats keep their own.', style: const TextStyle(fontSize: 12)),
           const SizedBox(height: 6),
           Wrap(spacing: 4, crossAxisAlignment: WrapCrossAlignment.center, children: [
             const Text('Phones type with: ', style: TextStyle(fontSize: 12)),
