@@ -493,6 +493,9 @@ class _CartoonPhoneState extends State<CartoonPhone> with SingleTickerProviderSt
       AnimationController(vsync: this, duration: const Duration(milliseconds: 1500));
   final _scope = FocusScopeNode(debugLabel: 'Phone keyboard');
   bool _shift = false, _sym = false, _caps = false, _leaving = false;
+
+  /// QWERTY phones: where the cursor is in the text.
+  late int _cur = _c.text.length;
   late final _Timeline _tl = _Timeline.of(widget.theme, widget.qwerty);
   final _fired = <int>{};
   static final _never = ValueNotifier<int>(0);
@@ -511,7 +514,7 @@ class _CartoonPhoneState extends State<CartoonPhone> with SingleTickerProviderSt
       widget.qwerty ? _numpadT9.typeInto(_c, widget.request.obscure, 'mode') : _togglePredictive();
     } else if (widget.qwerty) {
       _numpadT9.typeInto(_c, widget.request.obscure, key);
-      setState(() {});
+      setState(() => _cur = _c.text.length);
     } else {
       _engine.press(key);
     }
@@ -574,10 +577,45 @@ class _CartoonPhoneState extends State<CartoonPhone> with SingleTickerProviderSt
 
   // ------------------------------------------------------------ typing
 
-  void _setText(String t) {
+  void _setText(String t, [int? cursor]) {
+    _cur = (cursor ?? t.length).clamp(0, t.length);
     _c.text = t;
-    _c.selection = TextSelection.collapsed(offset: t.length);
+    _c.selection = TextSelection.collapsed(offset: _cur);
     setState(() {});
+  }
+
+  /// QWERTY: type [s] at the cursor.
+  void _insert(String s) {
+    final t = _c.text;
+    final at = _cur.clamp(0, t.length);
+    _setText(t.substring(0, at) + s + t.substring(at), at + s.length);
+  }
+
+  void _cursorLeft() {
+    if (!widget.qwerty) return _engine.cursorLeft();
+    if (_cur > 0) _setText(_c.text, _cur - 1);
+  }
+
+  void _cursorRight() {
+    if (!widget.qwerty) return _engine.cursorRight();
+    if (_cur < _c.text.length) _setText(_c.text, _cur + 1);
+  }
+
+  /// Select: lower case → CAPS → numbers/symbols → lower case.
+  void _cycleCase() {
+    if (!widget.qwerty) return _engine.cycleCase();
+    setState(() {
+      _shift = false;
+      if (_sym) {
+        _sym = false;
+        _caps = false;
+      } else if (_caps) {
+        _caps = false;
+        _sym = true;
+      } else {
+        _caps = true;
+      }
+    });
   }
 
   void _press(String k) {
@@ -601,13 +639,13 @@ class _CartoonPhoneState extends State<CartoonPhone> with SingleTickerProviderSt
       case 'del':
         _backspace();
       case 'space':
-        _setText('${_c.text} ');
+        _insert(' ');
       case ':)':
-        _setText('${_c.text}:) ');
+        _insert(':) ');
       default:
         final ch = (_shift != _caps) && !_sym ? k.toUpperCase() : k;
         _shift = false;
-        _setText(_c.text + ch);
+        _insert(ch);
     }
   }
 
@@ -617,7 +655,8 @@ class _CartoonPhoneState extends State<CartoonPhone> with SingleTickerProviderSt
       return;
     }
     final t = _c.text;
-    if (t.isNotEmpty) _setText(t.substring(0, t.length - 1));
+    final at = _cur.clamp(0, t.length);
+    if (at > 0) _setText(t.substring(0, at - 1) + t.substring(at), at - 1);
   }
 
   T9Engine _makeEngine(String initial) {
@@ -626,7 +665,7 @@ class _CartoonPhoneState extends State<CartoonPhone> with SingleTickerProviderSt
       predictive: _settings.t9Predictive && !widget.request.obscure,
       onText: (t) {
         _c.text = t;
-        _c.selection = TextSelection.collapsed(offset: t.length);
+        _c.selection = TextSelection.collapsed(offset: _engine.cursor.clamp(0, t.length));
         if (mounted) setState(() {});
       },
     );
@@ -651,8 +690,6 @@ class _CartoonPhoneState extends State<CartoonPhone> with SingleTickerProviderSt
     });
   }
 
-  bool get _empty => _c.text.isEmpty && (widget.qwerty || !_engine.composing);
-
   void _togglePredictive() {
     if (widget.qwerty) {
       _press(widget.theme.device == Device.pocketBrick ? 'caps' : 'sym');
@@ -675,33 +712,38 @@ class _CartoonPhoneState extends State<CartoonPhone> with SingleTickerProviderSt
 
   bool _onPad(PadAction a) {
     if (_osk.arranging) return _osk.arrangePad(a, _settings);
-    const felt = {PadAction.b, PadAction.x, PadAction.y, PadAction.select, PadAction.start, PadAction.lb};
+    const felt = {
+      PadAction.x, PadAction.y, PadAction.select, PadAction.selectHold, PadAction.start, //
+      PadAction.lb, PadAction.rb,
+    };
     if (felt.contains(a)) _click(pad: true);
     switch (a) {
+      case PadAction.lb:
+        _cursorLeft();
+        return true;
       case PadAction.rb:
+        _cursorRight();
+        return true;
+      case PadAction.rbHold:
         _osk.toggleArrange();
         return true;
       case PadAction.b:
-        if (_empty) {
-          _leave(false);
-        } else {
-          _backspace();
-        }
+        _leave(false);
         return true;
       case PadAction.x:
-        widget.qwerty ? _press('space') : _engine.space();
+        _backspace();
         return true;
       case PadAction.y:
-        widget.qwerty ? _press('shift') : _engine.nextCandidate();
+        widget.qwerty ? _press('space') : _engine.space();
         return true;
       case PadAction.select:
-        _togglePredictive();
+        _cycleCase();
+        return true;
+      case PadAction.selectHold:
+        if (!widget.qwerty) _togglePredictive();
         return true;
       case PadAction.start:
         _submit();
-        return true;
-      case PadAction.lb:
-        widget.qwerty ? _press(':)') : _engine.press('#');
         return true;
       default:
         return false;
@@ -781,6 +823,7 @@ class _CartoonPhoneState extends State<CartoonPhone> with SingleTickerProviderSt
           mode: widget.qwerty ? (_sym ? 'SYM' : (_caps ? 'CAPS' : (_shift ? 'SHIFT' : 'abc'))) : _engine.modeLabel,
           lines: r.preview?.call() ?? const [],
           text: r.obscure ? '•' * _c.text.length : (widget.qwerty ? _c.text : _engine.text),
+          cursor: widget.qwerty ? _cur : _engine.cursor,
           footer: !widget.qwerty && _engine.predictive && _engine.candidates.length > 1
               ? '${_engine.candidateIndex + 1}/${_engine.candidates.length}  * next word'
               : t.sendHint,
@@ -843,6 +886,9 @@ class MiniScreen extends StatelessWidget {
   final String mode;
   final List<OskLine> lines;
   final String text;
+
+  /// Where the cursor sits in [text] (null = at the end).
+  final int? cursor;
   final String footer;
   const MiniScreen({
     super.key,
@@ -851,8 +897,19 @@ class MiniScreen extends StatelessWidget {
     required this.mode,
     required this.lines,
     required this.text,
+    this.cursor,
     required this.footer,
   });
+
+  /// What the typing line shows: the text with a _ cursor, trimmed to the
+  /// part around the cursor when it's long.
+  String get _typed {
+    final at = (cursor ?? text.length).clamp(0, text.length);
+    var before = text.substring(0, at), after = text.substring(at);
+    if (before.length > 100) before = '…${before.substring(before.length - 100)}';
+    if (after.length > 40) after = '${after.substring(0, 40)}…';
+    return '${before}_$after';
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -888,7 +945,7 @@ class MiniScreen extends StatelessWidget {
           margin: const EdgeInsets.only(top: 4),
           padding: const EdgeInsets.only(top: 4),
           decoration: BoxDecoration(border: Border(top: BorderSide(color: t.screenDim, width: 2))),
-          child: Text('${text.length > 120 ? '…${text.substring(text.length - 120)}' : text}_',
+          child: Text(_typed,
               maxLines: 2, overflow: TextOverflow.ellipsis),
         ),
         Text(footer, style: TextStyle(color: t.screenDim, fontSize: fs * 0.72, fontWeight: FontWeight.w700)),

@@ -104,7 +104,11 @@ class T9Engine {
   T9Case caseMode = T9Case.sentence;
   T9Dictionary? dict;
 
+  /// Text before the cursor (the word being typed goes right after it).
   String _base;
+
+  /// Text after the cursor (empty unless the cursor was moved left).
+  String _after = '';
   String _keys = '';
   List<String> _cands = const [];
   int _ci = 0;
@@ -120,7 +124,10 @@ class T9Engine {
     if (_shouldCapitalize()) caseMode = T9Case.sentence;
   }
 
-  String get text => _base + _composing;
+  String get text => _base + _composing + _after;
+
+  /// Where the cursor is in [text].
+  int get cursor => _base.length + _composing.length;
   String get composingWord => _composing;
   List<String> get candidates => _cands;
   int get candidateIndex => _ci;
@@ -269,7 +276,61 @@ class T9Engine {
     _commitWord();
     _endMultitap();
     _emit();
-    return _base;
+    return text;
+  }
+
+  /// True right after a multi-tap letter, while pressing the same key again
+  /// would still change it.
+  bool get letterPending =>
+      !predictive && _lastKey != null && _lastKey != '#' && DateTime.now().difference(_lastTap) < tapTimeout;
+
+  /// Accept the letter (or word) being typed without moving.
+  void confirm() {
+    _commitWord();
+    _endMultitap();
+    _emit();
+  }
+
+  /// Move the cursor one character left.
+  void cursorLeft() {
+    _commitWord();
+    _endMultitap();
+    if (_base.isNotEmpty) {
+      final chars = _base.characters;
+      final last = chars.last;
+      _base = chars.take(chars.length - 1).toString();
+      _after = last + _after;
+    }
+    _emit();
+  }
+
+  /// Move the cursor one character right. Right after a multi-tap letter it
+  /// only accepts that letter, so the same key can type the next one at once
+  /// (44 [RB] 444 = "hi").
+  void cursorRight() {
+    if (letterPending || _keys.isNotEmpty) {
+      confirm();
+      return;
+    }
+    _endMultitap();
+    if (_after.isNotEmpty) {
+      final chars = _after.characters;
+      _base += chars.first;
+      _after = chars.skip(1).toString();
+    }
+    _emit();
+  }
+
+  /// Select: lower case → CAPS → numbers → back to normal.
+  void cycleCase() {
+    _commitWord();
+    _endMultitap();
+    caseMode = switch (caseMode) {
+      T9Case.sentence || T9Case.lower => T9Case.upper,
+      T9Case.upper => T9Case.numbers,
+      T9Case.numbers => T9Case.sentence,
+    };
+    _emit();
   }
 
   void togglePredictive() {

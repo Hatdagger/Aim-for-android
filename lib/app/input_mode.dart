@@ -7,7 +7,13 @@ import 'package:gamepads/gamepads.dart';
 
 import 'settings.dart';
 
-enum PadAction { up, down, left, right, a, b, x, y, start, select, lb, rb }
+enum PadAction {
+  up, down, left, right, a, b, x, y, start, select, lb, rb,
+
+  /// Select / RB held down for a moment (sent instead of [select] / [rb]).
+  selectHold,
+  rbHold,
+}
 
 typedef PadHandler = bool Function(PadAction action);
 
@@ -27,6 +33,12 @@ class InputMode extends ChangeNotifier {
   Timer? _repeat;
   PadAction? _heldDir;
   final Set<PadAction> _down = {};
+
+  /// Buttons that do something else when held: they act on release, or
+  /// after [holdTime] as their "held" action.
+  static const _holdable = {PadAction.select: PadAction.selectHold, PadAction.rb: PadAction.rbHold};
+  static const holdTime = Duration(milliseconds: 450);
+  final Map<PadAction, Timer?> _holding = {};
 
   InputMode(this.settings) {
     settings.addListener(notifyListeners);
@@ -65,7 +77,29 @@ class InputMode extends ChangeNotifier {
     for (final h in _handlers.reversed.toList()) {
       if (h(a)) return;
     }
+    // Nobody wants the "held" version: treat it as a normal press.
+    final tap = _holdable.entries.where((e) => e.value == a).firstOrNull?.key;
+    if (tap != null) return dispatch(tap);
     _defaultAction(a);
+  }
+
+  /// A holdable button went down: wait to see whether it's a tap or a hold.
+  void _holdDown(PadAction a) {
+    if (_holding.containsKey(a)) return; // key repeat
+    notePad();
+    _holding[a] = Timer(holdTime, () {
+      _holding[a] = null; // fired; the release does nothing
+      dispatch(_holdable[a]!);
+    });
+  }
+
+  void _holdUp(PadAction a) {
+    if (!_holding.containsKey(a)) return;
+    final t = _holding.remove(a);
+    if (t != null && t.isActive) {
+      t.cancel();
+      dispatch(a);
+    }
   }
 
   void _defaultAction(PadAction a) {
@@ -109,6 +143,15 @@ class InputMode extends ChangeNotifier {
   /// Root key handler. Returns true if the event was consumed.
   bool handleKey(KeyEvent e) {
     final k = e.logicalKey;
+    if (k == LogicalKeyboardKey.gameButtonSelect || k == LogicalKeyboardKey.gameButtonRight1) {
+      final a = k == LogicalKeyboardKey.gameButtonSelect ? PadAction.select : PadAction.rb;
+      if (e is KeyUpEvent) {
+        _holdUp(a);
+      } else {
+        _holdDown(a);
+      }
+      return true;
+    }
     if (e is KeyUpEvent) return false;
     PadAction? a;
     if (k == LogicalKeyboardKey.gameButtonB) a = PadAction.b;
@@ -162,9 +205,14 @@ class InputMode extends ChangeNotifier {
           final pressed = ev.value > 0.5;
           if (pressed && !_down.contains(a)) {
             _down.add(a);
-            _press(a);
+            if (_holdable.containsKey(a)) {
+              scheduleMicrotask(() => _holdDown(a));
+            } else {
+              _press(a);
+            }
           } else if (!pressed && _down.contains(a)) {
             _down.remove(a);
+            if (_holdable.containsKey(a)) scheduleMicrotask(() => _holdUp(a));
             if (_heldDir == a) _stopRepeat();
           }
         } else if (ax == GamepadAxis.leftStickX || ax == GamepadAxis.leftStickY) {
@@ -212,6 +260,9 @@ class InputMode extends ChangeNotifier {
   void dispose() {
     _padSub?.cancel();
     _stopRepeat();
+    for (final t in _holding.values) {
+      t?.cancel();
+    }
     settings.removeListener(notifyListeners);
     super.dispose();
   }

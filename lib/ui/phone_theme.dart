@@ -299,7 +299,7 @@ const kPhoneThemes = <PhoneTheme>[
     softInk: Color(0xFF041004),
     focus: Color(0xFFD8FF7A),
     splash: 'AIM',
-    sendHint: 'DONE sends · B deletes',
+    sendHint: 'DONE sends · X deletes',
   ),
   PhoneTheme(
     id: 'pocketmail',
