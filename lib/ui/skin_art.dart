@@ -1488,7 +1488,7 @@ class WatchArt extends StatelessWidget {
       );
 
   Widget _face() {
-    const label = TextStyle(color: _orange, fontSize: 11, fontWeight: FontWeight.w900, letterSpacing: 1.5);
+    const label = TextStyle(color: _orange, fontSize: 11, fontWeight: FontWeight.w900, letterSpacing: 1);
     final rows = [
       [const K('1'), const K('2'), const K('3'), K('send', label: 'SEND', bg: kSendGreen, ink: t.ink)],
       [const K('4'), const K('5'), const K('6'), K('mode', label: 'MODE', bg: _orange, ink: t.ink)],
@@ -1513,7 +1513,7 @@ class WatchArt extends StatelessWidget {
             height: 18,
             child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
               Text('LIGHT', style: label),
-              Text('AIM · DATABANK', style: label),
+              Expanded(child: FittedBox(fit: BoxFit.scaleDown, child: Text('AIM · DATABANK', style: label))),
               Text('MODE', style: label),
             ]),
           ),
