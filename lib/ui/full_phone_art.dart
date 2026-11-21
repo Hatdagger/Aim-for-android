@@ -1,3 +1,5 @@
+import 'dart:math';
+
 import 'package:flutter/material.dart';
 
 import '../app/t9.dart';
@@ -21,6 +23,13 @@ class FullPhoneArt extends StatelessWidget {
 
   /// 0 = screen off, 1 = on.
   final double power;
+
+  /// Opening animation, 0 = closed, 1 = open: flip phones fold their screen
+  /// lid open over the keys; sliders and gadgets slide their keys out.
+  final double open;
+
+  /// Vertical squash when a candybar lands (1 = none).
+  final double squash;
   final PhoneKeys keys;
 
   /// Leaves full screen (shows the chat behind the phone again).
@@ -33,6 +42,8 @@ class FullPhoneArt extends StatelessWidget {
     required this.screen,
     required this.keys,
     this.power = 1,
+    this.open = 1,
+    this.squash = 1,
     this.onShowChat,
   });
 
@@ -43,7 +54,10 @@ class FullPhoneArt extends StatelessWidget {
     return LayoutBuilder(builder: (ctx, c) {
       final portrait = c.maxHeight >= c.maxWidth;
       final inner = portrait ? _portrait(c.maxHeight) : _landscape(c.maxWidth);
-      return ShellBox(
+      return Transform(
+        alignment: Alignment.bottomCenter,
+        transform: Matrix4.diagonal3Values(1 + (1 - squash) * 0.6, squash, 1),
+        child: ShellBox(
         color: t.body,
         pattern: t.pattern,
         ink: t.ink,
@@ -51,38 +65,119 @@ class FullPhoneArt extends StatelessWidget {
         radius: BorderRadius.circular(36),
         padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
         child: SizedBox.expand(child: inner),
-      );
+      ));
     });
   }
 
   // ------------------------------------------------------------ layouts
 
+  /// A flip phone typing on its keypad: the screen is a lid that folds open.
+  bool get _flips => !letters && t.flip;
+
+  /// Everything else that opens with a moving part slides its keys out.
+  bool get _slides => !_flips && (letters || t.ownKeyboard);
+
+  /// The keys, sliding out from under the screen while the phone opens.
+  Widget _keysPart(Offset closed) {
+    final k = letters ? _qwerty() : _keypad();
+    if (!_slides || open >= 1) return k;
+    return ClipRect(child: FractionalTranslation(translation: closed * (1 - open), child: k));
+  }
+
+  /// The screen; on a flip phone it folds about [hinge] ([vertical]: top to
+  /// bottom, else sideways), showing the outside of the lid while shut.
+  Widget _lid(Widget front, {required Alignment hinge, required bool vertical}) {
+    if (!_flips || open >= 1) return front;
+    final angle = (1 - open) * pi; // 0 = open, pi = folded over the keys
+    final m = Matrix4.identity()..setEntry(3, 2, 0.0011);
+    if (vertical) {
+      m.rotateX(-angle);
+    } else {
+      m.rotateY(angle);
+    }
+    final back = Transform(
+      alignment: Alignment.center,
+      transform: vertical ? Matrix4.rotationX(pi) : Matrix4.rotationY(pi),
+      child: _lidBack(),
+    );
+    return Transform(alignment: hinge, transform: m, child: angle > pi / 2 ? back : front);
+  }
+
+  /// Outside of the lid: the shell colour with a little clock display.
+  Widget _lidBack() {
+    final now = TimeOfDay.now();
+    return ShellBox(
+      color: t.shell,
+      pattern: t.shellPattern,
+      ink: t.ink,
+      shadow: false,
+      radius: BorderRadius.circular(26),
+      child: Center(
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
+          decoration: BoxDecoration(
+            color: t.screenOn,
+            borderRadius: BorderRadius.circular(30),
+            border: Border.all(color: t.ink, width: 5),
+          ),
+          child: Text('${now.hour}:${now.minute.toString().padLeft(2, '0')}',
+              style: TextStyle(color: t.screenInk, fontSize: 30, fontWeight: FontWeight.w800)),
+        ),
+      ),
+    );
+  }
+
   Widget _portrait(double h) {
-    // Screen on top, a row of soft keys, then the keys take the rest.
+    // Screen on top, a row of soft keys, then the keys take the rest. The
+    // screen is drawn last so a flip lid folds down over the keys.
     final screenH = (h * (letters ? 0.36 : 0.32)).clamp(150.0, 360.0);
-    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-      SizedBox(height: screenH, child: _screenBox()),
-      const SizedBox(height: 10),
-      SizedBox(height: 50, child: _softRow(withSend: !letters)),
-      const SizedBox(height: 10),
-      Expanded(child: letters ? _qwerty() : _keypad()),
+    return Stack(clipBehavior: Clip.none, children: [
+      Positioned.fill(
+        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          SizedBox(height: screenH),
+          const SizedBox(height: 10),
+          SizedBox(height: 50, child: _softRow(withSend: !letters)),
+          const SizedBox(height: 10),
+          Expanded(child: _keysPart(const Offset(0, 1))),
+        ]),
+      ),
+      Positioned(
+        left: 0,
+        right: 0,
+        top: 0,
+        height: screenH,
+        child: _lid(_screenBox(), hinge: Alignment.bottomCenter, vertical: true),
+      ),
     ]);
   }
 
   Widget _landscape(double w) {
-    // Screen on the left with the soft keys under it, keys on the right.
+    // Screen on the left with the soft keys under it, keys on the right. A
+    // flip lid folds sideways over the keys.
     final screenW = (w * (letters ? 0.3 : 0.42)).clamp(200.0, 460.0);
-    return Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-      SizedBox(
-        width: screenW,
-        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-          Expanded(child: _screenBox()),
-          const SizedBox(height: 10),
-          SizedBox(height: 46, child: _softRow(withSend: !letters, compact: true)),
+    return Stack(clipBehavior: Clip.none, children: [
+      Positioned.fill(
+        child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          SizedBox(width: screenW),
+          const SizedBox(width: 12),
+          Expanded(child: _keysPart(const Offset(1, 0))),
         ]),
       ),
-      const SizedBox(width: 12),
-      Expanded(child: letters ? _qwerty() : _keypad()),
+      Positioned(
+        left: 0,
+        top: 0,
+        bottom: 0,
+        width: screenW,
+        child: _lid(
+          Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            Expanded(child: _screenBox()),
+            const SizedBox(height: 10),
+            SizedBox(height: 46, child: _softRow(withSend: !letters, compact: true)),
+          ]),
+          hinge: Alignment.centerRight,
+          vertical: false,
+        ),
+      ),
     ]);
   }
 

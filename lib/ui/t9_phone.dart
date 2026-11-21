@@ -821,6 +821,8 @@ class _CartoonPhoneState extends State<CartoonPhone> with SingleTickerProviderSt
                 t: t,
                 letters: widget.qwerty,
                 power: power,
+                open: open,
+                squash: squash,
                 keys: keys,
                 screen: screen,
                 onShowChat: widget.onShowChat,
