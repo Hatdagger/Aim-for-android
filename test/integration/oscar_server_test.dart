@@ -5,6 +5,8 @@ import 'dart:typed_data';
 import 'package:aim_for_android/oscar/aim_html.dart';
 import 'package:aim_for_android/oscar/bytes.dart';
 import 'package:aim_for_android/oscar/client.dart';
+import 'package:aim_for_android/oscar/direct_connect.dart';
+import 'package:aim_for_android/oscar/odc.dart';
 import 'package:aim_for_android/oscar/session.dart';
 import 'package:crypto/crypto.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -19,8 +21,21 @@ AimClient _client(String sn, {String pw = _pw}) => AimClient(
       server: ServerConfig.parse(_server!),
       screenName: sn,
       password: pw,
+      useUpnp: false,
       backoff: const [Duration(milliseconds: 300), Duration(seconds: 1)],
     );
+
+Future<void> _dcState(AimClient c, DirectState s, {Duration wait = const Duration(seconds: 40)}) => c.events
+    .firstWhere((e) => e is DirectConnectEvent && e.event is DirectStateChanged && (e.event as DirectStateChanged).state == s)
+    .timeout(wait, onTimeout: () => throw TestFailure('${c.screenName}: no Direct Connect state $s '
+        '(now ${c.direct.links.values.map((l) => '${l.peer}=${l.state}').join(', ')})'));
+
+Future<DirectMessage> _dcMessage(AimClient c) async {
+  final e = await c.events
+      .firstWhere((e) => e is DirectConnectEvent && e.event is DirectMessageIn)
+      .timeout(const Duration(seconds: 30));
+  return ((e as DirectConnectEvent).event as DirectMessageIn).message;
+}
 
 Future<void> _online(AimClient c, {Duration wait = const Duration(seconds: 30)}) async {
   if (c.isOnline) return;
@@ -258,4 +273,88 @@ void main() {
     expect(s.isBuddy('alice'), isFalse);
     await c.dispose();
   }, skip: skip, timeout: const Timeout(Duration(minutes: 4)));
+
+  test('Direct Connect: decline, pictures both ways, reverse connect, and failure', () async {
+    final a = _client('alice');
+    final b = _client('bob');
+    a.start();
+    b.start();
+    await _online(a);
+    await _online(b);
+
+    // 1. bob says no
+    var invited = _dcState(b, DirectState.invited);
+    var declined = _dcState(a, DirectState.declined);
+    await a.direct.invite('bob');
+    await invited;
+    await b.direct.decline('alice');
+    await declined;
+
+    // 2. bob accepts: messages and pictures go straight between them
+    invited = _dcState(b, DirectState.invited);
+    var aOpen = _dcState(a, DirectState.connected);
+    var bOpen = _dcState(b, DirectState.connected);
+    await a.direct.invite('bob');
+    await invited;
+    final prop = b.direct.linkFor('alice')!.proposal!;
+    expect(prop.addresses, isNotEmpty);
+    await b.direct.accept('alice');
+    await aOpen;
+    await bOpen;
+    expect(a.direct.isOpen('bob'), isTrue);
+
+    final pic = Uint8List.fromList([0xff, 0xd8, 0xff, ...List.generate(600000, (i) => (i * 7) & 0xff)]);
+    var got = _dcMessage(b);
+    await a.direct.send('bob', 'look at this', images: [OdcImage(1, pic, name: 'cat.jpg')]);
+    var m = await got;
+    expect(m.text, 'look at this');
+    expect(m.images.single.data, pic);
+
+    got = _dcMessage(a);
+    await b.direct.send('alice', 'cute ☕');
+    expect((await got).text, 'cute ☕');
+
+    final typing = a.events.firstWhere((e) => e is DirectConnectEvent && e.event is DirectTypingIn);
+    b.direct.sendTyping('alice', 2);
+    final te = await typing.timeout(const Duration(seconds: 10));
+    expect(((te as DirectConnectEvent).event as DirectTypingIn).state, 2);
+
+    final aClosed = _dcState(a, DirectState.closed);
+    await b.direct.close('alice');
+    await aClosed;
+    expect(a.direct.isOpen('bob'), isFalse);
+
+    // 3. bob can't reach alice, so alice connects to bob instead
+    a.direct.debugUnreachable = true;
+    invited = _dcState(b, DirectState.invited);
+    aOpen = _dcState(a, DirectState.connected);
+    bOpen = _dcState(b, DirectState.connected);
+    await a.direct.invite('bob');
+    await invited;
+    await b.direct.accept('alice');
+    await aOpen;
+    await bOpen;
+    got = _dcMessage(a);
+    await b.direct.send('alice', 'reverse ok', images: [OdcImage(1, pic.sublist(0, 1000))]);
+    m = await got;
+    expect(m.text, 'reverse ok');
+    expect(m.images.single.data, pic.sublist(0, 1000));
+    final bClosed = _dcState(b, DirectState.closed);
+    await a.direct.close('bob');
+    await bClosed;
+
+    // 4. neither can reach the other: both just say it failed
+    b.direct.debugUnreachable = true;
+    invited = _dcState(b, DirectState.invited);
+    final aFail = _dcState(a, DirectState.failed);
+    final bFail = _dcState(b, DirectState.failed);
+    await a.direct.invite('bob');
+    await invited;
+    await b.direct.accept('alice');
+    await aFail;
+    await bFail;
+
+    await a.dispose();
+    await b.dispose();
+  }, skip: skip, timeout: const Timeout(Duration(minutes: 3)));
 }

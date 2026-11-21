@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:path_provider/path_provider.dart';
 
@@ -19,8 +20,20 @@ class ChatLine {
   /// Outbox id while the message is still pending, otherwise null.
   String? pendingId;
 
+  /// Pictures in this message (files on this device), sent by Direct Connect.
+  final List<String> images;
+
+  /// A note from the app ("Direct Connect is open"), not a message.
+  final bool system;
+
   ChatLine(this.from, this.text, this.time,
-      {required this.mine, this.auto = false, this.pendingId, this.fg, this.bg});
+      {required this.mine,
+      this.auto = false,
+      this.pendingId,
+      this.fg,
+      this.bg,
+      this.images = const [],
+      this.system = false});
 
   Map<String, dynamic> toJson() =>
       {
@@ -31,6 +44,8 @@ class ChatLine {
         if (auto) 'a': true,
         if (fg != null) 'fg': fg,
         if (bg != null) 'bg': bg,
+        if (images.isNotEmpty) 'img': images,
+        if (system) 'sys': true,
       };
 
   static ChatLine fromJson(Map<String, dynamic> j) => ChatLine(
@@ -41,6 +56,8 @@ class ChatLine {
         auto: j['a'] as bool? ?? false,
         fg: j['fg'] as int?,
         bg: j['bg'] as int?,
+        images: [for (final p in (j['img'] as List?) ?? const []) p as String],
+        system: j['sys'] as bool? ?? false,
       );
 }
 
@@ -83,8 +100,35 @@ class HistoryStore {
     return out;
   }
 
+  /// Keeps a picture from a chat on this device (cleared on sign-off with
+  /// the history). Returns its path.
+  Future<String> savePicture(String owner, Uint8List bytes) async {
+    final d = Directory('${(await _dir(owner)).path}${Platform.pathSeparator}pictures');
+    await d.create(recursive: true);
+    final f = File('${d.path}${Platform.pathSeparator}'
+        '${DateTime.now().microsecondsSinceEpoch}${pictureExtension(bytes)}');
+    await f.writeAsBytes(bytes, flush: true);
+    return f.path;
+  }
+
   Future<void> clear(String owner) async {
     final d = await _dir(owner);
     if (await d.exists()) await d.delete(recursive: true);
   }
 }
+
+/// The file extension for picture bytes, from their first bytes ('.bin' when
+/// it isn't a picture the app shows).
+String pictureExtension(List<int> b) {
+  bool starts(List<int> sig) => b.length >= sig.length && List.generate(sig.length, (i) => b[i] == sig[i]).every((x) => x);
+  if (starts(const [0xff, 0xd8, 0xff])) return '.jpg';
+  if (starts(const [0x89, 0x50, 0x4e, 0x47])) return '.png';
+  if (starts(const [0x47, 0x49, 0x46, 0x38])) return '.gif';
+  if (starts(const [0x42, 0x4d])) return '.bmp';
+  if (b.length >= 12 && starts(const [0x52, 0x49, 0x46, 0x46]) && b[8] == 0x57 && b[9] == 0x45 && b[10] == 0x42 && b[11] == 0x50) {
+    return '.webp';
+  }
+  return '.bin';
+}
+
+bool isPicturePath(String path) => !path.endsWith('.bin');

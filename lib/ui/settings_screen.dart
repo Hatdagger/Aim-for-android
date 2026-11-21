@@ -118,6 +118,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 const Text('History is cleared when you sign off. Losing the connection does not clear it.',
                     style: TextStyle(fontSize: 12)),
               ]),
+              _section('Direct Connect', [
+                RetroCheckbox(
+                    value: s.allowDirectConnect,
+                    label: 'Let buddies ask to Direct Connect',
+                    onChanged: (v) => s.allowDirectConnect = v),
+                const Text('Direct Connect sends pictures straight between your device and your buddy\'s. '
+                    'They never go through the server. While you\'re connected, your buddy can see your IP address. '
+                    'You\'re always asked first.',
+                    style: TextStyle(fontSize: 12)),
+              ]),
               _section('Controller', [
                 const Text('Controller mode uses the built-in on-screen keyboard and big focus highlights.'),
                 const SizedBox(height: 4),

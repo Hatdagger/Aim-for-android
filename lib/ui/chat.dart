@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
@@ -6,10 +8,13 @@ import 'package:provider/provider.dart';
 import '../app/app_state.dart';
 import '../app/history.dart';
 import '../app/input_mode.dart';
+import '../app/pictures.dart';
 import '../app/settings.dart';
 import '../oscar/aim_html.dart';
 import '../oscar/bytes.dart';
 import '../oscar/client.dart';
+import '../oscar/direct_connect.dart';
+import 'direct_connect_ui.dart';
 import 'profile_screen.dart';
 import 'retro.dart';
 import 'color_picker.dart';
@@ -176,6 +181,16 @@ class _ChatPaneState extends State<ChatPane> {
               padding: const EdgeInsets.all(6),
               child: const Text('Not connected. Your messages will be sent when the connection comes back.'),
             ),
+          DirectBar(
+            state: app.directLink(widget.screenName)?.state,
+            name: conv.displayName,
+            progress: app.directProgress[key],
+            onAccept: () => app.directAccept(widget.screenName),
+            onDecline: () => app.directDecline(widget.screenName),
+            onCancel: () => app.directClose(widget.screenName),
+            onClose: () => app.directClose(widget.screenName),
+            onPicture: _sendPicture,
+          ),
           const SizedBox(height: 4),
           Expanded(
             child: Sunken(
@@ -242,7 +257,7 @@ class _ChatPaneState extends State<ChatPane> {
         action: TextInputAction.send,
         doneLabel: 'Send',
         oskPreview: () => [
-          for (final l in _app.conversationFor(widget.screenName).lines.reversed.take(5).toList().reversed)
+          for (final l in _app.conversationFor(widget.screenName).lines.where((l) => !l.system).toList().reversed.take(5).toList().reversed)
             OskLine(l.mine ? 'me' : l.from, l.text, l.mine),
         ],
         oskPreviewListen: _app,
@@ -295,7 +310,7 @@ class _ChatPaneState extends State<ChatPane> {
       icon(blocked ? Icons.lock_open : Icons.block, blocked ? 'Unblock' : 'Block',
           signedOn ? () => _block(name, !blocked) : null),
       icon(Icons.person_add_alt_1, 'Add Buddy', signedOn && !buddy ? () => _addBuddy(name) : null),
-      icon(Icons.phone_in_talk, 'Talk (not available yet)', null),
+      icon(Icons.image, 'Picture (Direct Connect)', signedOn ? _picture : null),
       icon(Icons.info_outline, 'Get Info', () => Navigator.of(context)
           .push(MaterialPageRoute(builder: (_) => ProfileScreen(screenName: widget.screenName)))),
     ]);
@@ -314,7 +329,7 @@ class _ChatPaneState extends State<ChatPane> {
       _barButton(blocked ? Icons.lock_open : Icons.block, blocked ? 'Unblock' : 'Block',
           signedOn ? () => _block(name, !blocked) : null),
       _barButton(Icons.person_add_alt_1, 'Add Buddy', signedOn && !buddy ? () => _addBuddy(name) : null),
-      _barButton(Icons.phone_in_talk, 'Talk', null), // voice isn't supported (yet)
+      _barButton(Icons.image, 'Picture', signedOn ? _picture : null),
       _barButton(Icons.info_outline, 'Get Info', () => Navigator.of(context)
           .push(MaterialPageRoute(builder: (_) => ProfileScreen(screenName: widget.screenName)))),
       const SizedBox(width: 4),
@@ -450,7 +465,67 @@ class _ChatPaneState extends State<ChatPane> {
     }
   }
 
+  // ---------------------------------------------------------------- Direct Connect pictures
+
+  /// The Picture button: send one if Direct Connect is open, otherwise ask
+  /// the buddy to Direct Connect first.
+  Future<void> _picture() async {
+    final app = _app;
+    final link = app.directLink(widget.screenName);
+    if (app.directOpen(widget.screenName)) return _sendPicture();
+    if (link != null && link.state == DirectState.invited) return app.directAccept(widget.screenName);
+    if (link != null && link.isPending) return;
+    final name = app.conversationFor(widget.screenName).displayName;
+    if (!await confirmDirectConnect(context, name)) return;
+    await app.directInvite(widget.screenName);
+  }
+
+  Future<void> _sendPicture() async {
+    final picked = await pickPicture(context);
+    if (picked == null || !mounted) return;
+    final bytes = await preparePicture(Uint8List.fromList(picked));
+    if (!mounted) return;
+    if (bytes == null) {
+      showRetroMessage(context, 'Send Picture', 'That file isn\'t a picture this app can send.');
+      return;
+    }
+    try {
+      await _app.sendPicture(widget.screenName, bytes);
+    } catch (e) {
+      if (mounted) showRetroMessage(context, 'Send Picture', 'Direct Connect is not open.');
+    }
+    _scrollToEnd();
+  }
+
+  Widget _note(ChatLine l) => Center(
+        child: Container(
+          margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 12),
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+          color: const Color(0xCCFFFFFF),
+          child: Text(l.text,
+              textAlign: TextAlign.center,
+              style: const TextStyle(fontSize: 12, fontStyle: FontStyle.italic, color: Color(0xFF404040))),
+        ),
+      );
+
+  Widget _picturesOf(ChatLine l, String who) => Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          for (final p in l.images)
+            if (isPicturePath(p))
+              ChatPicture(image: FileImage(File(p)), onTap: () => PictureViewer.open(context, p, 'Picture from $who'))
+            else
+              const Padding(
+                padding: EdgeInsets.only(top: 4),
+                child: Text('(something that isn\'t a picture was sent; it wasn\'t opened)',
+                    style: TextStyle(fontStyle: FontStyle.italic, fontSize: 12)),
+              ),
+        ],
+      );
+
   Widget _bubble(AppState app, ChatLine l) {
+    if (l.system) return _note(l);
     final pending = l.pendingId == null ? null : app.pending(l.pendingId!);
     final mine = l.mine;
     final time = TimeOfDay.fromDateTime(l.time).format(context);
@@ -471,7 +546,8 @@ class _ChatPaneState extends State<ChatPane> {
           style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: nameColor),
         ),
         const SizedBox(height: 2),
-        SelectableText(l.text, style: TextStyle(fontSize: 15, color: fg)),
+        if (l.text.isNotEmpty) SelectableText(l.text, style: TextStyle(fontSize: 15, color: fg)),
+        if (l.images.isNotEmpty) _picturesOf(l, l.mine ? 'me' : l.from),
         if (pending != null) _pendingRow(app, pending),
       ]),
     );

@@ -15,6 +15,15 @@ func (a *App) apiHandler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/v1/signup", a.handleSignup)
 	mux.HandleFunc("/api/v1/invites", a.handleCreateInvite)
+	// The app asks "what's my address?" so it can tell a buddy where to Direct
+	// Connect. Only the address goes back; pictures never pass through here.
+	mux.HandleFunc("/api/v1/myip", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost && r.Method != http.MethodGet {
+			apiErr(w, 405, "method", "Use POST.")
+			return
+		}
+		apiOK(w, map[string]string{"ip": hostOnly(r.RemoteAddr)})
+	})
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/" || strings.HasPrefix(r.URL.Path, "/i/") {
 			a.webHandler().ServeHTTP(w, r) // invite pages work over https too

@@ -77,6 +77,11 @@ codes: `invalid_invite`, `invite_used`, `invite_expired`, `name_taken`,
 ```
 → `200 {"code":"7KQ2-M9XD","link":"http://HOST:5190/i/7KQ2-M9XD#fp=…&by=Hatdagger","uses_left":1,"expires_at":"2026-11-27T19:00:00Z"}`
 
+`POST /api/v1/myip` (no auth) → `200 {"ip":"203.0.113.7"}` — the caller's
+address as the server sees it. The app puts it in its Direct Connect proposal,
+because Open OSCAR Server behind the app only sees a loopback address. Only
+addresses pass through the server: pictures and files never do.
+
 ## Abuse limits (defaults, all adjustable; tuned for big households)
 | Same… | Allowed / 24 h | Flag for review | Auto-ban |
 |---|---|---|---|

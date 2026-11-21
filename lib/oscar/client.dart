@@ -3,6 +3,7 @@ import 'dart:math';
 
 import 'aim_html.dart';
 import 'bytes.dart';
+import 'direct_connect.dart';
 import 'models.dart';
 import 'session.dart';
 
@@ -49,6 +50,12 @@ class OutboxChanged extends ClientEvent {
   OutboxChanged(this.message);
 }
 
+/// Something happened on Direct Connect (see [AimClient.direct]).
+class DirectConnectEvent extends ClientEvent {
+  final DirectEvent event;
+  DirectConnectEvent(this.event);
+}
+
 /// Keeps one screen name signed on: reconnects when the link drops, holds
 /// outgoing messages until they can be delivered, and answers with the away
 /// message while away. Pure Dart so it runs in tests without Flutter.
@@ -60,6 +67,9 @@ class AimClient {
   String? _awayHtml;
   bool fixLoopbackRedirects;
 
+  /// Direct Connect (pictures straight between devices).
+  late final DirectConnect direct;
+
   /// Delays between reconnect attempts.
   List<Duration> backoff;
 
@@ -69,6 +79,8 @@ class AimClient {
     required this.password,
     this.profileHtml = '',
     this.fixLoopbackRedirects = true,
+    bool useUpnp = true,
+    Future<String?> Function()? publicIp,
     this.backoff = const [
       Duration(seconds: 1),
       Duration(seconds: 3),
@@ -77,7 +89,15 @@ class AimClient {
       Duration(seconds: 20),
       Duration(seconds: 30),
     ],
-  });
+  }) {
+    direct = DirectConnect(
+      session: () => _session,
+      myName: () => _session?.formattedScreenName ?? screenName,
+      publicIp: publicIp,
+      useUpnp: useUpnp,
+    );
+    direct.events.listen((e) => _emit(DirectConnectEvent(e)));
+  }
 
   OscarSession? _session;
   LinkState _state = LinkState.offline;
@@ -193,6 +213,7 @@ class AimClient {
     _retryTimer?.cancel();
     final w = _wake;
     if (w != null && !w.isCompleted) w.complete();
+    await direct.closeAll();
     await _session?.signOff();
     for (final m in outbox.where((m) => m.isPending).toList()) {
       m.status = OutboxStatus.cancelled;
@@ -221,6 +242,8 @@ class AimClient {
         if (any) _schedulePump(Duration.zero);
       case MessageReceived(:final message):
         if (isAway && !message.autoResponse) _maybeAutoReply(message.from);
+      case RendezvousReceived(:final from, :final rdv):
+        direct.onRendezvous(from, rdv);
       default:
         break;
     }
@@ -374,6 +397,7 @@ class AimClient {
 
   Future<void> dispose() async {
     await signOff();
+    await direct.dispose();
     await _events.close();
   }
 }

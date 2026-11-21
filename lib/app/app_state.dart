@@ -7,6 +7,8 @@ import 'package:flutter/foundation.dart';
 import '../oscar/aim_html.dart';
 import '../oscar/bytes.dart';
 import '../oscar/client.dart';
+import '../oscar/direct_connect.dart';
+import '../oscar/odc.dart';
 import '../oscar/models.dart';
 import '../oscar/session.dart';
 import '../oscar/signup_api.dart';
@@ -51,6 +53,7 @@ class AppState extends ChangeNotifier {
 
     syncStyle();
     settings.addListener(syncStyle);
+    settings.addListener(() => client?.direct.allowIncoming = settings.allowDirectConnect);
     inbox.incoming.listen((inv) {
       pendingInvite = inv;
       notifyListeners();
@@ -148,7 +151,9 @@ class AppState extends ChangeNotifier {
       password: password,
       profileHtml: textToAimHtml(settings.profileFor(screenName)),
       fixLoopbackRedirects: settings.fixLoopbackRedirects,
+      publicIp: () => _api(server).myIp(),
     );
+    c.direct.allowIncoming = settings.allowDirectConnect;
     client = c;
     _iconUploaded = false;
     conversations.clear();
@@ -198,6 +203,7 @@ class AppState extends ChangeNotifier {
     conversations.clear();
     buddyIcons.clear();
     _buddyIconHash.clear();
+    directProgress.clear();
     openChat = null;
     everOnline = false;
     awayIsAuto = false;
@@ -224,6 +230,8 @@ class AppState extends ChangeNotifier {
         _onOutbox(message);
       case SessionEvent(:final event):
         _onSession(event);
+      case DirectConnectEvent(:final event):
+        _onDirect(event);
     }
     notifyListeners();
   }
@@ -274,6 +282,7 @@ class AppState extends ChangeNotifier {
         if (c != null) c.typing = state;
       case BuddyListChanged():
       case SelfInfoChanged():
+      case RendezvousReceived():
         break;
     }
   }
@@ -286,14 +295,21 @@ class AppState extends ChangeNotifier {
   }
 
   void _onIncoming(IncomingMessage m) {
-    final conv = conversationFor(m.from);
-    final first = conv.lines.isEmpty;
-    conv.displayName = m.from;
-    conv.typing = 0;
     final (fg, bg) = aimHtmlColors(m.html);
-    final line = ChatLine(m.from, m.text, m.time, mine: false, auto: m.autoResponse, fg: fg, bg: bg);
+    _addIncoming(m.from, ChatLine(m.from, m.text, m.time, mine: false, auto: m.autoResponse, fg: fg, bg: bg));
+  }
+
+  void _addIncoming(String from, ChatLine line) {
+    final conv = conversationFor(from);
+    final first = conv.lines.where((l) => !l.system).isEmpty;
+    conv.displayName = from;
+    conv.typing = 0;
     conv.lines.add(line);
     _persist(conv, line);
+    _alert(conv, first: first);
+  }
+
+  void _alert(Conversation conv, {bool first = false}) {
     final viewing = foreground && openChat == conv.key;
     if (!viewing) conv.unread++;
     if (foreground) {
@@ -321,6 +337,113 @@ class AppState extends ChangeNotifier {
     }
   }
 
+  // --------------------------------------------------------------- direct connect
+
+  /// Bytes of a picture arriving now, per buddy: (got, total).
+  final Map<String, (int, int)> directProgress = {};
+
+  DirectLink? directLink(String sn) => client?.direct.linkFor(sn);
+  bool directOpen(String sn) => client?.direct.isOpen(sn) ?? false;
+
+  final Set<String> _directWasOpen = {};
+
+  void _note(String sn, String text) {
+    final conv = conversationFor(sn);
+    final line = ChatLine('', text, DateTime.now(), mine: false, system: true);
+    conv.lines.add(line);
+  }
+
+  void _onDirect(DirectEvent e) {
+    switch (e) {
+      case DirectStateChanged(:final link, :final state):
+        final key = normalizeSn(link.peer);
+        final conv = conversationFor(link.peer);
+        switch (state) {
+          case DirectState.invited:
+            _alert(conv);
+          case DirectState.connected:
+            _directWasOpen.add(key);
+            _note(link.peer, 'Direct Connect with ${conv.displayName} is open. Pictures go straight between you.');
+            sounds.play(SoundEvent.buddyIn);
+          case DirectState.failed:
+            _note(link.peer, 'Direct Connect failed.');
+          case DirectState.declined:
+            _note(link.peer, '${conv.displayName} declined Direct Connect.');
+          case DirectState.closed:
+            directProgress.remove(key);
+            if (_directWasOpen.remove(key)) _note(link.peer, 'Direct Connect closed.');
+          case DirectState.inviting:
+          case DirectState.connecting:
+            break;
+        }
+      case DirectMessageIn(:final from, :final message):
+        directProgress.remove(normalizeSn(from));
+        unawaited(_onDirectMessage(from, message));
+      case DirectTypingIn(:final from, :final state):
+        final c = conversations[normalizeSn(from)];
+        if (c != null) c.typing = state;
+      case DirectProgress(:final from, :final got, :final total):
+        final key = normalizeSn(from);
+        if (got >= total) {
+          directProgress.remove(key);
+        } else {
+          directProgress[key] = (got, total);
+        }
+    }
+  }
+
+  Future<void> _onDirectMessage(String from, DirectMessage m) async {
+    final owner = client?.screenName;
+    if (owner == null) return;
+    final paths = <String>[];
+    for (final im in m.images.take(20)) {
+      try {
+        paths.add(await history.savePicture(owner, im.data));
+      } catch (_) {}
+    }
+    if (m.text.isEmpty && paths.isEmpty) return;
+    final (fg, bg) = aimHtmlColors(m.html);
+    _addIncoming(from,
+        ChatLine(from, m.text, DateTime.now(), mine: false, auto: m.autoResponse, fg: fg, bg: bg, images: paths));
+    notifyListeners();
+  }
+
+  Future<void> directInvite(String sn) async {
+    final c = client;
+    if (c == null) return;
+    conversationFor(sn);
+    final f = c.direct.invite(sn);
+    notifyListeners();
+    await f;
+  }
+
+  Future<void> directAccept(String sn) async => client?.direct.accept(sn);
+  Future<void> directDecline(String sn) async => client?.direct.decline(sn);
+  Future<void> directClose(String sn) async => client?.direct.close(sn);
+
+  /// Sends a picture over the open Direct Connect. [bytes] is already sized
+  /// for sending (see pictures.dart).
+  Future<void> sendPicture(String to, Uint8List bytes, {String text = ''}) async {
+    final c = client;
+    if (c == null || !c.direct.isOpen(to)) throw Exception('Direct Connect is not open');
+    final path = await history.savePicture(c.screenName, bytes);
+    final conv = conversationFor(to);
+    final line = ChatLine(myScreenName, text, DateTime.now(),
+        mine: true, fg: settings.myTextColor, bg: settings.myBackColor, images: [path]);
+    conv.lines.add(line);
+    notifyListeners();
+    final ext = pictureExtension(bytes);
+    try {
+      await c.direct.send(to, text, images: [OdcImage(1, bytes, name: 'picture$ext')]);
+      _persist(conv, line);
+      sounds.play(SoundEvent.imSent);
+    } catch (_) {
+      conv.lines.remove(line);
+      _note(to, 'Picture not sent: Direct Connect closed.');
+    }
+    notifyListeners();
+  }
+
   OutgoingMessage? pending(String id) => client?.outbox.where((m) => m.id == id).firstOrNull;
 
   void _persist(Conversation c, ChatLine l) {
@@ -333,6 +456,33 @@ class AppState extends ChangeNotifier {
   void send(String to, String text) {
     final c = client;
     if (c == null || text.trim().isEmpty) return;
+    if (c.direct.isOpen(to)) {
+      unawaited(_sendDirect(c, to, text.trim()));
+      return;
+    }
+    _sendViaServer(c, to, text);
+  }
+
+  /// While Direct Connect is open, messages go over it (like AIM does). If it
+  /// dropped, the message goes through the server instead.
+  Future<void> _sendDirect(AimClient c, String to, String text) async {
+    final conv = conversationFor(to);
+    final line = ChatLine(myScreenName, text, DateTime.now(),
+        mine: true, fg: settings.myTextColor, bg: settings.myBackColor);
+    conv.lines.add(line);
+    notifyListeners();
+    try {
+      await c.direct.send(to, text);
+      _persist(conv, line);
+      sounds.play(SoundEvent.imSent);
+    } catch (_) {
+      conv.lines.remove(line);
+      _sendViaServer(c, to, text);
+    }
+    notifyListeners();
+  }
+
+  void _sendViaServer(AimClient c, String to, String text) {
     final conv = conversationFor(to);
     final m = c.send(to, text.trim());
     conv.lines.add(ChatLine(myScreenName, text.trim(), DateTime.now(),
@@ -350,7 +500,15 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
-  void typing(String to, int state) => client?.session?.sendTyping(to, state);
+  void typing(String to, int state) {
+    final c = client;
+    if (c == null) return;
+    if (c.direct.isOpen(to)) {
+      c.direct.sendTyping(to, state);
+    } else {
+      c.session?.sendTyping(to, state);
+    }
+  }
 
   void openConversation(String? sn) {
     openChat = sn == null ? null : normalizeSn(sn);

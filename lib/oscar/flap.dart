@@ -87,6 +87,13 @@ class FlapConnection {
   Future<String> get done => _done.future;
   bool get isClosed => _closed;
   String get remoteHost => _socket.remoteAddress.address;
+  String? get localHost {
+    try {
+      return _socket.address.address;
+    } catch (_) {
+      return null;
+    }
+  }
 
   int nextReqId() {
     _reqId = (_reqId + 1) & 0x7fffffff;

@@ -8,8 +8,10 @@ import (
 	"crypto/tls"
 	"io"
 	"net"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -233,5 +235,16 @@ func TestRouterSniff(t *testing.T) {
 	}
 	if _, ok := tc.(*tls.Conn); !ok {
 		t.Fatalf("https listener got %T", tc)
+	}
+}
+
+func TestMyIPEndpoint(t *testing.T) {
+	a := &App{}
+	req := httptest.NewRequest("POST", "/api/v1/myip", strings.NewReader("{}"))
+	req.RemoteAddr = "203.0.113.7:51234"
+	rec := httptest.NewRecorder()
+	a.apiHandler().ServeHTTP(rec, req)
+	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"ip":"203.0.113.7"`) {
+		t.Fatalf("got %d %s", rec.Code, rec.Body.String())
 	}
 }

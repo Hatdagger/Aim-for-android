@@ -89,6 +89,19 @@ class SignupApi {
       DateTime.tryParse(j['expires_at']?.toString() ?? ''),
     );
   }
+
+  /// This device's public address as the AIM Server app sees it (used so a
+  /// buddy elsewhere can Direct Connect). null on servers without the app.
+  Future<String?> myIp() async {
+    try {
+      final j = await _post('/api/v1/myip', const {}).timeout(const Duration(seconds: 4));
+      final ip = j['ip']?.toString();
+      final a = ip == null ? null : InternetAddress.tryParse(ip);
+      return a != null && a.type == InternetAddressType.IPv4 && !a.isLoopback ? ip : null;
+    } catch (_) {
+      return null;
+    }
+  }
 }
 
 class CreatedInvite {

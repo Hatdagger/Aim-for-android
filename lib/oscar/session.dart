@@ -9,6 +9,7 @@ import 'aim_html.dart';
 import 'bytes.dart';
 import 'flap.dart';
 import 'models.dart';
+import 'rendezvous.dart';
 
 /// Things the server tells us without being asked.
 sealed class OscarEvent {}
@@ -36,6 +37,13 @@ class TypingChanged extends OscarEvent {
   /// 0 = stopped, 1 = typed (paused), 2 = typing
   final int state;
   TypingChanged(this.screenName, this.state);
+}
+
+/// A Direct Connect handshake message from a buddy (propose/accept/cancel).
+class RendezvousReceived extends OscarEvent {
+  final String from;
+  final Rendezvous rdv;
+  RendezvousReceived(this.from, this.rdv);
 }
 
 class SelfInfoChanged extends OscarEvent {
@@ -79,6 +87,7 @@ final _caps = [
   unhex('094613464c7f11d18222444553540000'), // buddy icon
   unhex('0946134e4c7f11d18222444553540000'), // UTF-8 / unicode messages
   unhex('748f2420628711d18222444553540000'), // chat
+  capDirectIm, // Direct Connect (pictures in IMs)
 ];
 
 /// One signed-on OSCAR session (auth + BOS + optional BART connection).
@@ -411,6 +420,13 @@ class OscarSession {
     r.bytes(8); // cookie
     final channel = r.u16();
     final info = UserInfo.read(r);
+    if (channel == 2) {
+      final data = r.tlvs()[0x0005];
+      if (data == null || data.value.length < 26) return;
+      final rdv = Rendezvous.parse(data.value);
+      if (rdv.isDirectIm) _emit(RendezvousReceived(info.screenName, rdv));
+      return;
+    }
     if (channel != 1) return;
     final tlvs = r.tlvs();
     final msgData = tlvs[0x0002];
@@ -831,6 +847,38 @@ class OscarSession {
       return SendResult.failed;
     }
   }
+
+  /// Sends a Direct Connect handshake message (ICBM channel 2). Only this
+  /// small message goes through the server.
+  Future<SendResult> sendRendezvous(String to, Uint8List cookie, Uint8List data) async {
+    final bos = _requireBos();
+    final w = ByteWriter()
+      ..bytes(cookie)
+      ..u16(2)
+      ..str8(to)
+      ..tlv(0x0005, data)
+      ..tlv(0x0003, const []);
+    final reqId = bos.nextReqId();
+    final replyF = bos.expect(const [(0x0004, 0x000c), (0x0004, 0x0001)],
+        reqId: reqId, timeout: const Duration(seconds: 15));
+    bos.sendSnac(0x0004, 0x0006, w.toBytes(), reqId: reqId);
+    try {
+      final reply = await replyF;
+      if (reply.subtype == 0x000c) return SendResult.delivered;
+      final code = reply.data.length >= 2 ? (reply.data[0] << 8) | reply.data[1] : 0;
+      if (code == 0x0004) return SendResult.recipientOffline;
+      if (code == 0x0002 || code == 0x0003) return SendResult.rateLimited;
+      return SendResult.failed;
+    } on OscarTimeout {
+      return isOnline ? SendResult.delivered : SendResult.failed;
+    } on ConnectionClosed {
+      return SendResult.failed;
+    }
+  }
+
+  /// This device's address on the connection to the server (its address on
+  /// the home network, usually).
+  String? get localIp => _bos?.localHost;
 
   void sendTyping(String to, int state) {
     final b = _bos;

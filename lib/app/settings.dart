@@ -175,6 +175,11 @@ class AppSettings extends ChangeNotifier {
   bool get historyEnabled => _p.getBool('history') ?? false;
   set historyEnabled(bool v) => _set('history', v);
 
+  // ------------------------------------------------------------ direct connect
+  /// Let buddies ask to Direct Connect (pictures straight between devices).
+  bool get allowDirectConnect => _p.getBool('directConnect') ?? true;
+  set allowDirectConnect(bool v) => _set('directConnect', v);
+
   // ------------------------------------------------------------ input
   ControllerMode get controllerMode => ControllerMode.values.byName(_p.getString('controller') ?? 'auto');
   set controllerMode(ControllerMode v) => _set('controller', v.name);
