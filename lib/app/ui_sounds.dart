@@ -44,6 +44,14 @@ enum UiSound {
 
   /// Putting it away.
   close,
+
+  /// Highlight moving between keys with the D-pad / stick (one per gadget
+  /// family): soft plastic tick, quiet square blip, tiny glassy blip,
+  /// click-wheel tick.
+  navKey,
+  navPixel,
+  navJewel,
+  navWheel,
 }
 
 const _rate = 22050;
@@ -115,6 +123,14 @@ List<double> synthSamples(UiSound s) {
           return y * sin(pi * t / 0.18) * 0.42;
         });
       }
+    case UiSound.navKey:
+      add(0, 14, (t) => noise() * exp(-t * 700) * 0.22 + sin(2 * pi * 2600 * t) * exp(-t * 600) * 0.12);
+    case UiSound.navPixel:
+      add(0, 18, (t) => sq(1568, t) * 0.1 * min(1.0, (0.018 - t) * 600));
+    case UiSound.navJewel:
+      add(0, 35, (t) => sin(2 * pi * (1400 + 3000 * t) * t) * exp(-t * 110) * 0.22);
+    case UiSound.navWheel:
+      add(0, 5, (t) => noise() * exp(-t * 1500) * 0.35);
   }
   for (var i = 0; i < out.length; i++) {
     out[i] = out[i].clamp(-1.0, 1.0);

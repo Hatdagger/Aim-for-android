@@ -361,25 +361,83 @@ class _BuddyListPaneState extends State<BuddyListPane> {
     });
   }
 
+  /// The classic AIM 5 strip of picture buttons under the list: one row,
+  /// a picture with a small word under it.
   Widget _toolbar(AppState app) {
-    return Wrap(spacing: 4, runSpacing: 4, alignment: WrapAlignment.center, children: [
-      RetroButton(minWidth: 0, onPressed: () => _awayDialog(app), child: const Text('Away')),
-      RetroButton(minWidth: 0, onPressed: () => _addBuddyDialog(app), child: const Text('Add')),
-      RetroButton(minWidth: 0, onPressed: () => _newGroup(app), child: const Text('New Group')),
-      RetroButton(minWidth: 0, onPressed: () => showInviteDialog(context), child: const Text('Invite')),
-      RetroButton(
-        minWidth: 0,
-        onPressed: () => Navigator.of(context).push(MaterialPageRoute(
-            builder: (_) => ProfileScreen(screenName: app.myScreenName, isMe: true))),
-        child: const Text('My Info'),
+    return Container(
+      decoration: bevel(),
+      padding: const EdgeInsets.symmetric(vertical: 2),
+      child: FocusTraversalGroup(
+        child: Row(children: [
+          Expanded(
+            child: Pictogram(
+              icon: Icons.chat_bubble,
+              color: const Color(0xFFF2C230),
+              label: 'IM',
+              onTap: () => _sendIm(),
+            ),
+          ),
+          Expanded(
+            child: Pictogram(
+              icon: Icons.badge,
+              color: const Color(0xFF3D7BD9),
+              label: 'Info',
+              onTap: () => Navigator.of(context).push(MaterialPageRoute(
+                  builder: (_) => ProfileScreen(screenName: app.myScreenName, isMe: true))),
+            ),
+          ),
+          Expanded(
+            child: Pictogram(
+              icon: Icons.sticky_note_2,
+              color: const Color(0xFFE8B23A),
+              label: 'Away',
+              dropdown: true,
+              onTap: () => _awayDialog(app),
+            ),
+          ),
+          Expanded(
+            child: Pictogram(
+              icon: Icons.exposure,
+              color: const Color(0xFF3DA33D),
+              label: 'Setup',
+              dropdown: true,
+              onTap: () => _setupMenu(app),
+            ),
+          ),
+        ]),
       ),
-      RetroButton(
-        minWidth: 0,
-        onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const SettingsScreen())),
-        child: const Icon(Icons.settings),
-      ),
-      RetroButton(minWidth: 0, onPressed: () => _confirmSignOff(app), child: const Text('Sign Off')),
-    ]);
+    );
+  }
+
+  Future<void> _sendIm() async {
+    final sn = await _askName('Send Instant Message', 'Screen name');
+    if (sn != null && sn.isNotEmpty) widget.onOpenChat(sn);
+  }
+
+  /// Setup ▾: everything that used to be a row of buttons.
+  void _setupMenu(AppState app) {
+    showRetroDialog<void>(context, title: 'Setup', builder: (ctx) {
+      Widget b(String label, VoidCallback f, {bool autofocus = false}) => Padding(
+            padding: const EdgeInsets.only(bottom: 4),
+            child: RetroButton(
+              autofocus: autofocus,
+              onPressed: () {
+                Navigator.of(ctx).pop();
+                f();
+              },
+              child: Text(label),
+            ),
+          );
+      return Column(crossAxisAlignment: CrossAxisAlignment.stretch, mainAxisSize: MainAxisSize.min, children: [
+        b('Add Buddy…', () => _addBuddyDialog(app), autofocus: true),
+        b('New Group…', () => _newGroup(app)),
+        b('Invite a Friend…', () => showInviteDialog(context)),
+        b('Preferences…',
+            () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const SettingsScreen()))),
+        b('Sign Off', () => _confirmSignOff(app)),
+        RetroButton(onPressed: () => Navigator.of(ctx).pop(), child: const Text('Cancel')),
+      ]);
+    });
   }
 
   void _buddyMenu(AppState app, String sn) {
@@ -559,6 +617,43 @@ class UnreadBadge extends StatelessWidget {
           const SizedBox(width: 3),
           Text(count > 99 ? '99+' : '$count',
               style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w900, fontSize: 13)),
+        ]),
+      ),
+    );
+  }
+}
+
+/// One picture button in the bottom strip: a coloured picture with its name
+/// under it, and a little ▾ when it opens a menu.
+class Pictogram extends StatelessWidget {
+  final IconData icon;
+  final Color color;
+  final String label;
+  final bool dropdown;
+  final VoidCallback onTap;
+  const Pictogram({super.key, required this.icon, required this.color, required this.label, required this.onTap, this.dropdown = false});
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      button: true,
+      label: label,
+      excludeSemantics: true,
+      child: RetroListTile(
+        onTap: onTap,
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          SizedBox(
+            height: 30,
+            child: Stack(clipBehavior: Clip.none, children: [
+              // A dark outline behind the picture, like the old icons.
+              Icon(icon, size: 30, color: Colors.black54),
+              Positioned(left: 1, top: 1, child: Icon(icon, size: 28, color: color)),
+              if (dropdown)
+                const Positioned(right: -10, top: -6, child: Icon(Icons.arrow_drop_down, size: 18)),
+            ]),
+          ),
+          const SizedBox(height: 1),
+          Text(label, style: const TextStyle(fontSize: 12)),
         ]),
       ),
     );

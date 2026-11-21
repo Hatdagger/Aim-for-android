@@ -3,6 +3,7 @@ import 'dart:ui' as ui;
 import 'dart:typed_data';
 
 import 'package:aim_for_android/oscar/direct_connect.dart';
+import 'package:aim_for_android/ui/buddy_list.dart';
 import 'package:aim_for_android/ui/direct_connect_ui.dart';
 import 'package:aim_for_android/ui/phone_art.dart';
 import 'package:aim_for_android/ui/retro.dart';
@@ -75,6 +76,64 @@ void main() {
     ('wideflip_half_open', 'wideflip', true, 0.6, 1, chat),
     ('girlypop_flip', 'girlypop', false, 1, 1, chat),
   ];
+
+  testWidgets('picture buddy_toolbar', (tester) async {
+    if (out == null) return;
+    tester.view.physicalSize = const Size(360, 200);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final key = GlobalKey();
+    Widget row(String name, {bool off = false}) => Padding(
+        padding: const EdgeInsets.fromLTRB(26, 4, 6, 4),
+        child: Text(name, style: TextStyle(color: off ? Retro.shadow : Colors.black)));
+    await tester.pumpWidget(MaterialApp(
+      debugShowCheckedModeBanner: false,
+      theme: ThemeData(fontFamily: 'DejaVu'),
+      home: Scaffold(
+        backgroundColor: Retro.desktop,
+        body: RepaintBoundary(
+          key: key,
+          child: Container(
+            color: Retro.desktop,
+            padding: const EdgeInsets.all(8),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+              Expanded(
+                child: Sunken(
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    const Text(' ▾ Buddies (1/3)', style: TextStyle(fontWeight: FontWeight.bold)),
+                    row('SkaterGrl0414'),
+                    const Text(' ▸ Offline (2)', style: TextStyle(fontWeight: FontWeight.bold, color: Retro.shadow)),
+                  ]),
+                ),
+              ),
+              const SizedBox(height: 4),
+              Container(
+                decoration: bevel(),
+                padding: const EdgeInsets.symmetric(vertical: 2),
+                child: Row(children: [
+                  for (final (i, c, l, d) in const [
+                    (Icons.chat_bubble, Color(0xFFF2C230), 'IM', false),
+                    (Icons.badge, Color(0xFF3D7BD9), 'Info', false),
+                    (Icons.sticky_note_2, Color(0xFFE8B23A), 'Away', true),
+                    (Icons.exposure, Color(0xFF3DA33D), 'Setup', true),
+                  ])
+                    Expanded(child: Pictogram(icon: i, color: c, label: l, dropdown: d, onTap: () {})),
+                ]),
+              ),
+            ]),
+          ),
+        ),
+      ),
+    ));
+    await tester.pump();
+    expect(tester.takeException(), isNull);
+    await tester.runAsync(() async {
+      final ro = key.currentContext!.findRenderObject()! as RenderRepaintBoundary;
+      final im = await ro.toImage(pixelRatio: 2);
+      final png = await im.toByteData(format: ui.ImageByteFormat.png);
+      File('$out/buddy_toolbar.png').writeAsBytesSync(png!.buffer.asUint8List());
+    });
+  });
 
   testWidgets('picture direct_connect', (tester) async {
     tester.view.physicalSize = const Size(720, 980);

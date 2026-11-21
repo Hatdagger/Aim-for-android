@@ -712,6 +712,16 @@ class _CartoonPhoneState extends State<CartoonPhone> with SingleTickerProviderSt
 
   bool _onPad(PadAction a) {
     if (_osk.arranging) return _osk.arrangePad(a, _settings);
+    if (a == PadAction.up || a == PadAction.down || a == PadAction.left || a == PadAction.right) {
+      // The highlight moves to the next key (done by the default handler).
+      _sfx(switch (widget.theme.device) {
+        Device.pocketBrick => UiSound.navPixel,
+        Device.dashboard => UiSound.navJewel,
+        Device.musicPlayer => UiSound.navWheel,
+        _ => UiSound.navKey,
+      });
+      return false;
+    }
     const felt = {
       PadAction.x, PadAction.y, PadAction.select, PadAction.selectHold, PadAction.start, PadAction.startSelect, //
       PadAction.lb, PadAction.rb,
