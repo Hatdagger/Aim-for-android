@@ -151,7 +151,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 const Text('In controller mode, typing uses a cartoon phone. Tap the keys or use the D-pad and A. '
                     'X deletes, Y space, LB / RB move the cursor (RB right after a letter accepts it, so 44 RB 444 types "hi"), '
                     'Select switches CAPS → numbers → lower case, hold Select turns predictive T9 on/off, '
-                    'Start sends, B closes the phone. Sideways screens: hold RB to move and resize the phone with the D-pad.'),
+                    'Start sends, B closes the phone. Sideways screens: hold Select and press Start to move and resize the phone with the D-pad.'),
                 const SizedBox(height: 6),
                 const Text('Keyboard'),
                 Wrap(spacing: 4, children: [

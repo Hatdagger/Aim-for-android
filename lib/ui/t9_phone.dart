@@ -713,7 +713,7 @@ class _CartoonPhoneState extends State<CartoonPhone> with SingleTickerProviderSt
   bool _onPad(PadAction a) {
     if (_osk.arranging) return _osk.arrangePad(a, _settings);
     const felt = {
-      PadAction.x, PadAction.y, PadAction.select, PadAction.selectHold, PadAction.start, //
+      PadAction.x, PadAction.y, PadAction.select, PadAction.selectHold, PadAction.start, PadAction.startSelect, //
       PadAction.lb, PadAction.rb,
     };
     if (felt.contains(a)) _click(pad: true);
@@ -724,7 +724,7 @@ class _CartoonPhoneState extends State<CartoonPhone> with SingleTickerProviderSt
       case PadAction.rb:
         _cursorRight();
         return true;
-      case PadAction.rbHold:
+      case PadAction.startSelect:
         _osk.toggleArrange();
         return true;
       case PadAction.b:

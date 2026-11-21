@@ -10,9 +10,11 @@ import 'settings.dart';
 enum PadAction {
   up, down, left, right, a, b, x, y, start, select, lb, rb,
 
-  /// Select / RB held down for a moment (sent instead of [select] / [rb]).
+  /// Select held down for a moment (sent instead of [select]).
   selectHold,
-  rbHold,
+
+  /// Start pressed while Select is held.
+  startSelect,
 }
 
 typedef PadHandler = bool Function(PadAction action);
@@ -35,8 +37,9 @@ class InputMode extends ChangeNotifier {
   final Set<PadAction> _down = {};
 
   /// Buttons that do something else when held: they act on release, or
-  /// after [holdTime] as their "held" action.
-  static const _holdable = {PadAction.select: PadAction.selectHold, PadAction.rb: PadAction.rbHold};
+  /// after [holdTime] as their "held" action. (Only Select: everything else
+  /// acts the moment it's pressed.)
+  static const _holdable = {PadAction.select: PadAction.selectHold};
   static const holdTime = Duration(milliseconds: 450);
   final Map<PadAction, Timer?> _holding = {};
 
@@ -74,6 +77,12 @@ class InputMode extends ChangeNotifier {
 
   void dispatch(PadAction a) {
     notePad();
+    // Start while Select is down: the Select+Start combo instead of either.
+    if (a == PadAction.start && _holding.containsKey(PadAction.select)) {
+      _holding[PadAction.select]?.cancel();
+      _holding[PadAction.select] = null; // its release does nothing
+      a = PadAction.startSelect;
+    }
     for (final h in _handlers.reversed.toList()) {
       if (h(a)) return;
     }
@@ -143,8 +152,8 @@ class InputMode extends ChangeNotifier {
   /// Root key handler. Returns true if the event was consumed.
   bool handleKey(KeyEvent e) {
     final k = e.logicalKey;
-    if (k == LogicalKeyboardKey.gameButtonSelect || k == LogicalKeyboardKey.gameButtonRight1) {
-      final a = k == LogicalKeyboardKey.gameButtonSelect ? PadAction.select : PadAction.rb;
+    if (k == LogicalKeyboardKey.gameButtonSelect) {
+      const a = PadAction.select;
       if (e is KeyUpEvent) {
         _holdUp(a);
       } else {
