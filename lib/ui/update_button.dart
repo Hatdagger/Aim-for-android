@@ -1,3 +1,6 @@
+import 'dart:async';
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -50,6 +53,8 @@ class UpdateButton extends StatelessWidget {
 Future<void> showUpdateDialog(BuildContext context) async {
   final u = context.read<UpdateChecker>();
   if (!u.available && !u.checking) u.check();
+  // An update is waiting: start right away (one tap from the Update button).
+  if (u.available && (u.step == UpdateStep.idle || u.step == UpdateStep.failed)) unawaited(u.installUpdate());
   await showRetroDialog<void>(context, title: 'Update', builder: (ctx) {
     return ListenableBuilder(
       listenable: u,
@@ -68,11 +73,20 @@ Future<void> showUpdateDialog(BuildContext context) async {
         } else {
           status = '';
         }
-        final how = switch (u.assetName) {
-          'aim-android.apk' => 'Tap Download, then open aim-android.apk and choose Update. '
-              'Your screen names, buddies and settings stay.',
-          'aim-windows.zip' => 'Download aim-windows.zip, close AIM, then unzip it over the old AIM folder.',
-          _ => 'Download aim-linux.tar.gz, close AIM, then extract it over the old AIM folder.',
+        final how = switch (u.step) {
+          UpdateStep.needsPermission => 'One time only: Android needs you to allow AIM to install its own updates. '
+              'Switch on "Allow from this source", then press Back. The update carries on by itself.',
+          UpdateStep.downloading => 'Downloading the update… ${(u.progress * 100).round()}%',
+          UpdateStep.installing => Platform.isAndroid
+              ? 'Android will ask "Do you want to update this app?" Tap Update. '
+                  'Your screen names, buddies and settings stay.'
+              : 'Installing… AIM will close and open again by itself.',
+          UpdateStep.failed => u.problem ?? 'The update didn\'t finish.',
+          UpdateStep.idle => Platform.isAndroid
+              ? 'Tap Update now. Android asks you to confirm, and AIM restarts as the new version. '
+                  'Your screen names, buddies and settings stay.'
+              : 'Tap Update now. AIM closes, updates itself and opens again. '
+                  'Your screen names, buddies and settings stay.',
         };
         return Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
           Row(children: [
@@ -84,15 +98,37 @@ Future<void> showUpdateDialog(BuildContext context) async {
           Text('You are running $mine.', style: const TextStyle(fontSize: 12)),
           const SizedBox(height: 8),
           Text(how),
+          if (u.step == UpdateStep.downloading) ...[
+            const SizedBox(height: 8),
+            Container(
+              height: 18,
+              decoration: bevel(sunken: true, color: Colors.white),
+              padding: const EdgeInsets.all(2),
+              alignment: Alignment.centerLeft,
+              child: FractionallySizedBox(
+                widthFactor: u.progress.clamp(0.0, 1.0),
+                child: Container(color: Retro.navy),
+              ),
+            ),
+          ],
           const SizedBox(height: 10),
           RetroButton(
             isDefault: u.available,
             autofocus: u.available,
+            onPressed: u.busy ? null : u.installUpdate,
+            child: Text(u.busy
+                ? 'Updating…'
+                : (u.step == UpdateStep.needsPermission
+                    ? 'Open the Android switch again'
+                    : (u.available ? 'Update now' : 'Reinstall the newest version'))),
+          ),
+          const SizedBox(height: 6),
+          RetroButton(
             onPressed: () {
               u.openDownload();
               Navigator.pop(ctx);
             },
-            child: Text(u.available ? 'Download update' : 'Download anyway'),
+            child: const Text('Download in browser instead', style: TextStyle(fontSize: 12)),
           ),
           const SizedBox(height: 6),
           RetroButton(onPressed: u.checking ? null : u.check, child: const Text('Check again')),

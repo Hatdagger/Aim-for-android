@@ -65,6 +65,35 @@ class PlatformBridge {
     } catch (_) {}
   }
 
+  // ------------------------------------------------------------ in-app updates
+
+  /// Android's installer said no (message from Android).
+  static void Function(String message)? onInstallFailed;
+
+  /// The app came back to the front (e.g. from the "allow installs" switch).
+  static void Function()? onResumed;
+
+  /// Whether Android lets AIM install its own updates yet.
+  static Future<bool> canInstallUpdates() async {
+    if (!_android) return true;
+    try {
+      return await _ch.invokeMethod<bool>('canInstallUpdates') ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Opens Android's one-time "Allow from this source" switch for AIM.
+  static Future<void> allowInstallUpdates() async {
+    if (!_android) return;
+    await _ch.invokeMethod('allowInstallUpdates');
+  }
+
+  /// Hands a downloaded APK to Android's installer (it shows its own prompt).
+  static Future<void> installApk(String path) async {
+    await _ch.invokeMethod('installApk', {'path': path});
+  }
+
   static Future<void> requestNotificationPermission() async {
     if (!_android) return;
     try {

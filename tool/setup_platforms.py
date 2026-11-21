@@ -51,6 +51,8 @@ def patch_android():
         'android.permission.WAKE_LOCK',
         'android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS',
         'android.permission.VIBRATE',
+        'android.permission.REQUEST_INSTALL_PACKAGES',  # in-app updates
+        'android.permission.UPDATE_PACKAGES_WITHOUT_USER_ACTION',  # later updates without a prompt (Android 12+)
     ]
     add = ''.join(f'    <uses-permission android:name="{p}"/>\n' for p in perms if p not in man)
     if add:

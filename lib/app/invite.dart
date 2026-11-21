@@ -4,6 +4,8 @@ import 'dart:io';
 import 'dart:math';
 
 import 'package:flutter/services.dart';
+
+import 'platform_bridge.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 /// An invite to a server, as carried by a share link.
@@ -58,6 +60,10 @@ class InviteInbox {
         if (call.method == 'link') {
           final inv = Invite.parse(call.arguments as String?);
           if (inv != null) _incoming.add(inv);
+        } else if (call.method == 'installFailed') {
+          PlatformBridge.onInstallFailed?.call(call.arguments?.toString() ?? '');
+        } else if (call.method == 'resumed') {
+          PlatformBridge.onResumed?.call();
         }
         return null;
       });

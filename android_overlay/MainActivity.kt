@@ -3,6 +3,8 @@ package __PACKAGE__
 import android.Manifest
 import android.annotation.SuppressLint
 import android.app.NotificationManager
+import android.app.PendingIntent
+import android.content.pm.PackageInstaller
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -20,6 +22,7 @@ import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.embedding.engine.FlutterEngineCache
 import io.flutter.embedding.engine.dart.DartExecutor
 import io.flutter.plugin.common.MethodChannel
+import java.io.File
 
 class MainActivity : FlutterActivity() {
     private var channel: MethodChannel? = null
@@ -48,6 +51,7 @@ class MainActivity : FlutterActivity() {
 
     companion object {
         const val ENGINE_ID = "aim_main"
+        const val INSTALL_ACTION = "com.hatdagger.aim.INSTALL_RESULT"
     }
 
     override fun onCreate(savedInstanceState: android.os.Bundle?) {
@@ -57,6 +61,10 @@ class MainActivity : FlutterActivity() {
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
+        if (intent.action == INSTALL_ACTION) {
+            onInstallResult(intent)
+            return
+        }
         val link = intent.dataString ?: return
         channel?.invokeMethod("link", link)
     }
@@ -107,6 +115,19 @@ class MainActivity : FlutterActivity() {
                         val url = call.argument<String>("url") ?: ""
                         val i = Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                         startActivity(i)
+                        result.success(null)
+                    }
+                    "canInstallUpdates" -> {
+                        result.success(Build.VERSION.SDK_INT < Build.VERSION_CODES.O || packageManager.canRequestPackageInstalls())
+                    }
+                    "allowInstallUpdates" -> {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                            startActivity(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:$packageName")))
+                        }
+                        result.success(null)
+                    }
+                    "installApk" -> {
+                        installApk(call.argument<String>("path") ?: "")
                         result.success(null)
                     }
                     "requestIgnoreBatteryOptimizations" -> {
@@ -176,6 +197,51 @@ class MainActivity : FlutterActivity() {
         return any
     }
 
+    /**
+     * Hands a downloaded update to Android's installer. Android then shows its
+     * own "Update this app?" prompt; the app restarts as the new version.
+     */
+    private fun installApk(path: String) {
+        val file = File(path)
+        val installer = packageManager.packageInstaller
+        val params = PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL)
+        params.setAppPackageName(packageName)
+        // Android 12+: once AIM has installed itself, later updates can go in
+        // without asking again (Android decides; it may still ask).
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            params.setRequireUserAction(PackageInstaller.SessionParams.USER_ACTION_NOT_REQUIRED)
+        }
+        val id = installer.createSession(params)
+        installer.openSession(id).use { session ->
+            file.inputStream().use { input ->
+                session.openWrite("aim.apk", 0, file.length()).use { out ->
+                    input.copyTo(out)
+                    session.fsync(out)
+                }
+            }
+            val flags = PendingIntent.FLAG_UPDATE_CURRENT or
+                (if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) PendingIntent.FLAG_MUTABLE else 0)
+            val back = Intent(this, MainActivity::class.java).setAction(INSTALL_ACTION)
+                .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP)
+            val pending = PendingIntent.getActivity(this, 7, back, flags)
+            session.commit(pending.intentSender)
+        }
+    }
+
+    private fun onInstallResult(intent: Intent) {
+        val status = intent.getIntExtra(PackageInstaller.EXTRA_STATUS, PackageInstaller.STATUS_FAILURE)
+        if (status == PackageInstaller.STATUS_PENDING_USER_ACTION) {
+            @Suppress("DEPRECATION")
+            val confirm = intent.getParcelableExtra<Intent>(Intent.EXTRA_INTENT)
+            if (confirm != null) startActivity(confirm)
+            return
+        }
+        if (status != PackageInstaller.STATUS_SUCCESS) {
+            val msg = intent.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE) ?: "status $status"
+            channel?.invokeMethod("installFailed", msg)
+        }
+    }
+
     @SuppressLint("BatteryLife")
     private fun requestIgnoreBattery() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return
@@ -187,6 +253,7 @@ class MainActivity : FlutterActivity() {
 
     override fun onResume() {
         super.onResume()
+        channel?.invokeMethod("resumed", null)
         (getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).cancel(AimNotifications.UNREAD_ID)
     }
 }
