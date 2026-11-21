@@ -142,7 +142,9 @@ class _OskHostState extends State<OskHost> {
     final osk = context.watch<OskController>();
     final s = context.watch<AppSettings>();
     final req = osk.current;
-    return LayoutBuilder(builder: (ctx, c) {
+    // This layer sits above the app's pages, so give its text the app's normal
+    // style (without it Flutter draws text with yellow warning underlines).
+    return Material(type: MaterialType.transparency, child: LayoutBuilder(builder: (ctx, c) {
       final W = c.maxWidth, H = c.maxHeight;
       final landscape = W > H * 1.05;
       osk.wide = landscape;
@@ -304,7 +306,7 @@ class _OskHostState extends State<OskHost> {
           ]),
         ),
       ]);
-    });
+    }));
   }
 }
 
