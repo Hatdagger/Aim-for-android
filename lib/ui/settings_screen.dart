@@ -64,7 +64,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
   @override
   Widget build(BuildContext context) {
     final app = context.watch<AppState>();
-    final s = app.settings;
+    // Redraw as soon as any setting changes, so ticks and choices show at once.
+    final s = context.watch<AppSettings>();
     return Scaffold(
       body: SafeArea(
         child: Desktop(
@@ -102,9 +103,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     RetroButton(
                       minWidth: 0,
                       padding: const EdgeInsets.symmetric(horizontal: 8),
+                      selected: s.autoAwayMinutes == m,
                       onPressed: () => s.autoAwayMinutes = m,
-                      child: Text('$m min',
-                          style: TextStyle(fontWeight: s.autoAwayMinutes == m ? FontWeight.bold : FontWeight.normal)),
+                      child: Text('$m min'),
                     ),
                 ]),
                 const Text('Automatic away message'),
@@ -135,15 +136,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   for (final m in ControllerMode.values)
                     RetroButton(
                       minWidth: 0,
+                      selected: s.controllerMode == m,
                       onPressed: () => s.controllerMode = m,
-                      child: Text(
-                        switch (m) {
-                          ControllerMode.auto => 'Auto',
-                          ControllerMode.on => 'Always',
-                          ControllerMode.off => 'Never',
-                        },
-                        style: TextStyle(fontWeight: s.controllerMode == m ? FontWeight.bold : FontWeight.normal),
-                      ),
+                      child: Text(switch (m) {
+                        ControllerMode.auto => 'Auto',
+                        ControllerMode.on => 'Always',
+                        ControllerMode.off => 'Never',
+                      }),
                     ),
                 ]),
               ]),
@@ -157,9 +156,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   for (final (id, label) in const [('t9', 'Phone keypad (T9)'), ('qwerty', 'Slide-out QWERTY')])
                     RetroButton(
                       minWidth: 0,
+                      selected: s.keyboardKind == id,
                       onPressed: () => s.keyboardKind = id,
-                      child: Text(label,
-                          style: TextStyle(fontWeight: s.keyboardKind == id ? FontWeight.bold : FontWeight.normal)),
+                      child: Text(label),
                     ),
                 ]),
                 const SizedBox(height: 6),

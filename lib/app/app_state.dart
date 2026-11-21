@@ -54,6 +54,9 @@ class AppState extends ChangeNotifier {
     syncStyle();
     settings.addListener(syncStyle);
     settings.addListener(() => client?.direct.allowIncoming = settings.allowDirectConnect);
+    // Screens watch AppState; redraw them whenever a setting changes so what
+    // they show always matches the settings in use.
+    settings.addListener(notifyListeners);
     inbox.incoming.listen((inv) {
       pendingInvite = inv;
       notifyListeners();

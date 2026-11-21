@@ -50,8 +50,9 @@ Future<(String?, String)?> pickKeyboard(BuildContext context,
             for (final (id, label) in const [('t9', 'Keypad (T9)'), ('qwerty', 'Slide-out QWERTY')])
               RetroButton(
                 minWidth: 0,
+                selected: k == id,
                 onPressed: () => setState(() => k = id),
-                child: Text(label, style: TextStyle(fontSize: 12, fontWeight: k == id ? FontWeight.bold : FontWeight.normal)),
+                child: Text(label, style: const TextStyle(fontSize: 12)),
               ),
           ]),
           const Text('(Console TV, Pocket Mail, Music Player and Pocket Brick always use their own keyboard.)',

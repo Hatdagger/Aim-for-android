@@ -164,6 +164,10 @@ class RetroButton extends StatefulWidget {
   final FocusNode? focusNode;
   final String? semanticLabel;
   final bool isDefault;
+
+  /// This is the option currently chosen (in a row of choices): the button
+  /// stays pushed in, tinted, with a check mark.
+  final bool selected;
   const RetroButton({
     super.key,
     required this.child,
@@ -175,6 +179,7 @@ class RetroButton extends StatefulWidget {
     this.focusNode,
     this.semanticLabel,
     this.isDefault = false,
+    this.selected = false,
   });
 
   @override
@@ -201,6 +206,7 @@ class _RetroButtonState extends State<RetroButton> {
       button: true,
       label: widget.semanticLabel,
       enabled: enabled,
+      selected: widget.selected,
       child: FocusableActionDetector(
         enabled: enabled,
         autofocus: widget.autofocus,
@@ -225,7 +231,9 @@ class _RetroButtonState extends State<RetroButton> {
                 ? BoxDecoration(border: Border.all(color: Colors.black, width: 1))
                 : null,
             child: Container(
-              decoration: bevel(sunken: _down),
+              decoration: bevel(
+                  sunken: _down || widget.selected,
+                  color: widget.selected ? const Color(0xFFFFFFE1) : Retro.face),
               padding: widget.padding,
               alignment: Alignment.center,
               foregroundDecoration: _focused
@@ -235,7 +243,19 @@ class _RetroButtonState extends State<RetroButton> {
                 style: TextStyle(color: enabled ? Colors.black : Retro.shadow, fontSize: 14),
                 child: IconTheme.merge(
                   data: IconThemeData(color: enabled ? Colors.black : Retro.shadow, size: 20),
-                  child: Transform.translate(offset: _down ? const Offset(1, 1) : Offset.zero, child: widget.child),
+                  child: Transform.translate(
+                    offset: _down || widget.selected ? const Offset(1, 1) : Offset.zero,
+                    child: widget.selected
+                        ? DefaultTextStyle.merge(
+                            style: const TextStyle(fontWeight: FontWeight.bold),
+                            child: Row(mainAxisSize: MainAxisSize.min, children: [
+                              const Icon(Icons.check, size: 16),
+                              const SizedBox(width: 4),
+                              Flexible(child: widget.child),
+                            ]),
+                          )
+                        : widget.child,
+                  ),
                 ),
               ),
             ),
