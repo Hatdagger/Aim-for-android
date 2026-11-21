@@ -433,7 +433,7 @@ class OscarSession {
     _emit(MessageReceived(IncomingMessage(
       info.screenName,
       html,
-      htmlToText(html),
+      messageText(html),
       tlvs.has(0x0004),
       DateTime.now(),
     )));

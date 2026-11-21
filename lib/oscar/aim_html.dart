@@ -23,6 +23,15 @@ String htmlToText(String html) {
   return s.trim();
 }
 
+/// Text of a received message. Older builds of this app sent away
+/// auto-replies with their HTML escaped, so after one pass the text still
+/// looks like `<HTML><BODY…>…`; strip that second layer too.
+String messageText(String html) {
+  var t = htmlToText(html);
+  if (RegExp(r'^\s*<(html|body|font)\b', caseSensitive: false).hasMatch(t)) t = htmlToText(t);
+  return t;
+}
+
 String escapeHtml(String text) => text
     .replaceAll('&', '&amp;')
     .replaceAll('<', '&lt;')

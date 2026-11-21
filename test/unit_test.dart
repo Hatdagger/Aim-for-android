@@ -8,6 +8,17 @@ import 'package:aim_for_android/oscar/session.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  test('away auto-replies show as text, not HTML tags', () {
+    const away = '<HTML><BODY BGCOLOR="#ffffff"><FONT LANG="0">I am away from my phone right now.</FONT></BODY></HTML>';
+    // What the old build sent: the away HTML escaped inside a new HTML message.
+    final oldStyle = textToAimHtml(away);
+    expect(messageText(oldStyle), 'I am away from my phone right now.');
+    // What the fixed build sends: plain text wrapped once.
+    expect(messageText(textToAimHtml(htmlToText(away))), 'I am away from my phone right now.');
+    // Someone typing about tags in a normal message is left alone.
+    expect(messageText(textToAimHtml('use <b> for bold')), 'use <b> for bold');
+  });
+
   test('TLV round trip', () {
     final w = ByteWriter()
       ..tlvString(1, 'hello')

@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:math';
 
+import 'aim_html.dart';
 import 'bytes.dart';
 import 'models.dart';
 import 'session.dart';
@@ -233,7 +234,10 @@ class AimClient {
     _lastAutoReply[key] = now;
     final s = _session;
     if (s == null || !s.isOnline) return;
-    final text = _awayHtml ?? '';
+    // The away message is stored as AIM HTML; sendIm wants plain text (it adds
+    // the HTML itself), otherwise the tags arrive as visible text.
+    final text = htmlToText(_awayHtml ?? '');
+    if (text.isEmpty) return;
     s.sendIm(to, text, autoResponse: true).ignore();
   }
 
