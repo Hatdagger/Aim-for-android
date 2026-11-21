@@ -53,7 +53,9 @@ class FullPhoneArt extends StatelessWidget {
   Widget build(BuildContext context) {
     return LayoutBuilder(builder: (ctx, c) {
       final portrait = c.maxHeight >= c.maxWidth;
-      final inner = portrait ? _portrait(c.maxHeight) : _landscape(c.maxWidth);
+      final inner = portrait
+          ? _portrait(c.maxHeight)
+          : (t.device == Device.wideT9 ? _wideLandscape(c.maxHeight) : _landscape(c.maxWidth));
       return Transform(
         alignment: Alignment.bottomCenter,
         transform: Matrix4.diagonal3Values(1 + (1 - squash) * 0.6, squash, 1),
@@ -78,8 +80,9 @@ class FullPhoneArt extends StatelessWidget {
   bool get _slides => !_flips && (letters || t.ownKeyboard);
 
   /// The keys, sliding out from under the screen while the phone opens.
-  Widget _keysPart(Offset closed) {
-    final k = letters ? _qwerty() : _keypad();
+  Widget _keysPart(Offset closed) => _slideIn(letters ? _qwerty() : _keypad(), closed);
+
+  Widget _slideIn(Widget k, Offset closed) {
     if (!_slides || open >= 1) return k;
     return ClipRect(child: FractionalTranslation(translation: closed * (1 - open), child: k));
   }
@@ -178,6 +181,81 @@ class FullPhoneArt extends StatelessWidget {
           vertical: false,
         ),
       ),
+    ]);
+  }
+
+  /// Wide T9 on its side: the long screen across the top with End / mode /
+  /// Show chat beside it, then the keypad in two rows of eight (half-key gap
+  /// down the middle) stretched across the whole width.
+  Widget _wideLandscape(double h) {
+    final screenH = (h * 0.42).clamp(110.0, 320.0);
+    final side = <Widget>[
+      _pill('End', kEndRed, t.ink, keys.end),
+      _pill(keys.modeLabel, t.softBg, t.softInk, keys.mode),
+      if (onShowChat != null) _pill('Show chat', t.softBg, t.softInk, onShowChat, icon: Icons.fullscreen_exit),
+    ];
+    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      SizedBox(
+        height: screenH,
+        child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          Expanded(child: _screenBox()),
+          const SizedBox(width: 10),
+          SizedBox(
+            width: 104,
+            child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+              for (var i = 0; i < side.length; i++) ...[
+                if (i > 0) const SizedBox(height: _gap),
+                Expanded(child: side[i]),
+              ],
+            ]),
+          ),
+        ]),
+      ),
+      const SizedBox(height: 12),
+      Expanded(child: _slideIn(_wideGrid(), const Offset(0, 1))),
+    ]);
+  }
+
+  Widget _wideGrid() {
+    Widget digit(String d) => _cell(
+          d,
+          (h) => Column(mainAxisSize: MainAxisSize.min, children: [
+            Text(d, style: _keyText((h * 0.42).clamp(18.0, 56.0))),
+            if (_sub(d).isNotEmpty)
+              Text(_sub(d),
+                  style: TextStyle(
+                      color: t.keySub, fontSize: (h * 0.17).clamp(10.0, 22.0), fontWeight: FontWeight.w700, height: 1.2)),
+          ]),
+          autofocus: d == '5',
+        );
+    Widget fn(String id, String label, Color bg, Color ink, VoidCallback? onTap) => _cell(
+          id,
+          (h) => Text(label, style: _keyText((h * 0.34).clamp(14.0, 36.0)).copyWith(color: ink)),
+          bg: bg,
+          onTap: onTap,
+        );
+    Widget row(List<(int, Widget?)> cells) => Expanded(
+          child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            for (var i = 0; i < cells.length; i++) ...[
+              if (i > 0) const SizedBox(width: _gap),
+              Expanded(flex: cells[i].$1, child: cells[i].$2 ?? const SizedBox()),
+            ],
+          ]),
+        );
+    final space = keys.press == null ? null : () => keys.press!('space');
+    return Column(children: [
+      row([
+        (2, digit('1')), (2, digit('2')), (2, digit('3')), (1, null),
+        (2, digit('7')), (2, digit('8')), (2, digit('9')),
+        (2, fn('clear', '⌫', t.softBg, t.softInk, keys.clear)),
+        (2, fn('send', keys.sendLabel, kSendGreen, t.ink, keys.send)),
+      ]),
+      const SizedBox(height: 10),
+      row([
+        (2, digit('4')), (2, digit('5')), (2, digit('6')), (1, null),
+        (2, digit('*')), (2, digit('0')), (2, digit('#')),
+        (4, fn('space', 'SPACE', t.softBg, t.softInk, space)),
+      ]),
     ]);
   }
 

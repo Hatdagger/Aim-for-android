@@ -3,6 +3,7 @@ import 'package:aim_for_android/app/settings.dart';
 import 'package:aim_for_android/app/sounds.dart';
 import 'package:aim_for_android/app/ui_sounds.dart';
 import 'package:aim_for_android/oscar/aim_html.dart';
+import 'package:aim_for_android/ui/full_phone_art.dart';
 import 'package:aim_for_android/ui/phone_art.dart';
 import 'package:aim_for_android/ui/phone_theme.dart';
 import 'package:aim_for_android/ui/t9_phone.dart';
@@ -107,6 +108,44 @@ void main() {
     expect(s.keyboardKindFor('bob'), 't9');
   });
 
+  test('T9 gadgets keep their keypad, letter gadgets their letters', () {
+    for (final t in kPhoneThemes) {
+      if (t.t9Gadget) {
+        expect(t.letters(true), isFalse, reason: t.id);
+        expect(t.letters(false), isFalse, reason: t.id);
+      }
+    }
+    expect(phoneThemeById('lipstick').letters(false), isTrue);
+    expect(phoneThemeById('widet9').t9Gadget, isTrue);
+  });
+
+  for (final t in kPhoneThemes) {
+    for (final view in const [Size(390, 844), Size(844, 390)]) {
+      testWidgets('${t.name} full screen ${view.width < view.height ? 'portrait' : 'landscape'}', (tester) async {
+        tester.view.physicalSize = view;
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.reset);
+        for (final open in [0.0, 0.5, 1.0]) {
+          await tester.pumpWidget(MaterialApp(
+            home: Scaffold(
+              body: FullPhoneArt(
+                t: t,
+                letters: t.letters(view.width > view.height),
+                open: open,
+                keys: PhoneKeys(press: (_) {}, send: () {}, end: () {}, clear: () {}, mode: () {}),
+                onShowChat: () {},
+                screen: const MiniScreen(t: kTestTheme, title: 'x', mode: 'T9', lines: [], text: 'hi', footer: 'f'),
+              ),
+            ),
+          ));
+          await tester.pump();
+          final ex = tester.takeException();
+          expect(ex, isNull, reason: 'open=$open: ${ex is FlutterError ? ex.toStringDeep() : ex}');
+        }
+      });
+    }
+  }
+
   test('phone and gadget ids are unique', () {
     final ids = kPhoneThemes.map((t) => t.id).toList();
     expect(ids.toSet().length, ids.length);
@@ -127,11 +166,23 @@ void main() {
   });
 
   testWidgets('gadget keyboards type and send', (tester) async {
-    for (final (id, letter, sendLabel) in const [
-      ('pocketbrick', 'a', 'ED'),
-      ('dashboard', 'a', 'Done'),
-      ('musicplayer', 'g', 'return'),
-      ('pocketmail', 'g', '⏎'),
+    for (final (id, tapText, letter, sendLabel) in const [
+      ('pocketbrick', 'a', 'a', 'ED'),
+      ('dashboard', 'a', 'a', 'Done'),
+      ('musicplayer', 'g', 'g', 'return'),
+      ('pocketmail', 'g', 'g', '⏎'),
+      ('swivel', '5', '5', 'Send'),
+      ('poptilt', 'g', 'g', 'Send'),
+      ('compact', '5', '5', 'Send'),
+      ('taco', '5', '5', 'Send'),
+      ('lipstick', 'OK', 'g', 'Send'),
+      ('pager', 'g', 'g', 'Send ⏎'),
+      ('cordless', '5', '5', 'TALK'),
+      ('watch', '5', '5', 'SEND'),
+      ('rotator', '5', '5', 'Send'),
+      ('jelly', '5', '5', 'Send'),
+      ('eggpet', 'TYPE', 'g', 'SEND'),
+      ('widet9', '5', '5', 'Send'),
     ]) {
       final t = phoneThemeById(id);
       final typed = <String>[];
@@ -148,7 +199,7 @@ void main() {
           ),
         ),
       );
-      await tester.tap(find.text(letter).first);
+      await tester.tap(find.text(tapText).first);
       await tester.tap(find.text(sendLabel).first);
       expect(typed, [letter], reason: id);
       expect(sent, 1, reason: id);

@@ -5,6 +5,7 @@ import 'dart:typed_data';
 import 'package:aim_for_android/oscar/direct_connect.dart';
 import 'package:aim_for_android/ui/buddy_list.dart';
 import 'package:aim_for_android/ui/direct_connect_ui.dart';
+import 'package:aim_for_android/ui/full_phone_art.dart';
 import 'package:aim_for_android/ui/phone_art.dart';
 import 'package:aim_for_android/ui/retro.dart';
 import 'package:aim_for_android/ui/phone_theme.dart';
@@ -75,6 +76,37 @@ void main() {
     ('wideflip_open', 'wideflip', true, 1, 1, chat),
     ('wideflip_half_open', 'wideflip', true, 0.6, 1, chat),
     ('girlypop_flip', 'girlypop', false, 1, 1, chat),
+    ('swivel', 'swivel', false, 1, 1, chat),
+    ('swivel_half', 'swivel', false, 0.5, 0, chat),
+    ('swivel_closed', 'swivel', false, 0, 0, chat),
+    ('poptilt', 'poptilt', false, 1, 1, chat),
+    ('poptilt_closed', 'poptilt', false, 0, 0, chat),
+    ('compact', 'compact', false, 1, 1, chat),
+    ('compact_closed', 'compact', false, 0, 0, chat),
+    ('taco', 'taco', false, 1, 1, chat),
+    ('lipstick', 'lipstick', false, 1, 1, chat),
+    ('lipstick_closed', 'lipstick', false, 0, 0, chat),
+    ('pager', 'pager', false, 1, 1, chat),
+    ('pager_closed', 'pager', false, 0, 0, chat),
+    ('cordless', 'cordless', false, 1, 1, chat),
+    ('watch', 'watch', false, 1, 1, chat),
+    ('rotator', 'rotator', false, 1, 1, chat),
+    ('rotator_closed', 'rotator', false, 0, 0, chat),
+    ('jelly', 'jelly', false, 1, 1, chat),
+    ('jelly_closed', 'jelly', false, 0, 0, chat),
+    ('eggpet', 'eggpet', false, 1, 1, chat),
+    ('widet9', 'widet9', false, 1, 1, chat),
+  ];
+
+  // Full-screen versions: (picture, style, screen size).
+  final fullShots = <(String, String, Size)>[
+    ('full_widet9_landscape', 'widet9', const Size(844, 390)),
+    ('full_widet9_portrait', 'widet9', const Size(390, 844)),
+    ('full_swivel_portrait', 'swivel', const Size(390, 844)),
+    ('full_compact_portrait', 'compact', const Size(390, 844)),
+    ('full_lipstick_landscape', 'lipstick', const Size(844, 390)),
+    ('full_eggpet_portrait', 'eggpet', const Size(390, 844)),
+    ('full_jelly_landscape', 'jelly', const Size(844, 390)),
   ];
 
   testWidgets('picture buddy_toolbar', (tester) async {
@@ -261,6 +293,45 @@ void main() {
         ),
       ));
       await tester.pump();
+      await tester.pump();
+      expect(tester.takeException(), isNull);
+      await tester.runAsync(() async {
+        final ro = key.currentContext!.findRenderObject()! as RenderRepaintBoundary;
+        final img = await ro.toImage(pixelRatio: 1);
+        final png = await img.toByteData(format: ui.ImageByteFormat.png);
+        File('$out/$name.png').writeAsBytesSync(png!.buffer.asUint8List());
+      });
+    }, skip: out == null);
+  }
+
+  for (final (name, id, view) in fullShots) {
+    testWidgets('picture $name', (tester) async {
+      final t = phoneThemeById(id);
+      tester.view.physicalSize = view;
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      final key = GlobalKey();
+      await tester.pumpWidget(MaterialApp(
+        debugShowCheckedModeBanner: false,
+        theme: ThemeData(fontFamily: 'DejaVu'),
+        home: Scaffold(
+          backgroundColor: const Color(0xFF101820),
+          body: RepaintBoundary(
+            key: key,
+            child: Container(
+              color: const Color(0xFF101820),
+              padding: const EdgeInsets.all(4),
+              child: FullPhoneArt(
+                t: t,
+                letters: t.letters(view.width > view.height),
+                keys: PhoneKeys(press: (_) {}, send: () {}, end: () {}, clear: () {}, mode: () {}),
+                onShowChat: () {},
+                screen: chat(t),
+              ),
+            ),
+          ),
+        ),
+      ));
       await tester.pump();
       expect(tester.takeException(), isNull);
       await tester.runAsync(() async {

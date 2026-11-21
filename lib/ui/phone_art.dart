@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../app/t9.dart';
 import 'device_art.dart';
 import 'phone_theme.dart';
+import 'skin_art.dart';
 
 /// What the keys do. Every callback null = a still picture (settings preview).
 class PhoneKeys {
@@ -92,6 +93,18 @@ class PhoneArt extends StatelessWidget {
         Device.pocketMail => PocketMailArt.size,
         Device.musicPlayer => MusicPlayerArt.size,
         Device.pocketBrick => PocketBrickArt.size,
+        Device.swivel => SwivelArt.size,
+        Device.popTilt => PopTiltArt.size,
+        Device.compact => CompactArt.size,
+        Device.taco => TacoArt.size,
+        Device.lipstick => LipstickArt.size,
+        Device.pager => PagerArt.size,
+        Device.cordless => CordlessArt.size,
+        Device.watch => WatchArt.size,
+        Device.rotator => RotatorArt.size,
+        Device.jelly => JellyArt.size,
+        Device.eggPet => EggPetArt.size,
+        Device.wideT9 => WideT9Art.size,
       };
 
   @override
@@ -105,6 +118,18 @@ class PhoneArt extends StatelessWidget {
       Device.pocketMail => PocketMailArt(t: t, power: power, keys: keys, screen: screen),
       Device.musicPlayer => MusicPlayerArt(t: t, open: open, power: power, keys: keys, screen: screen),
       Device.pocketBrick => PocketBrickArt(t: t, open: open, power: power, keys: keys, screen: screen),
+      Device.swivel => SwivelArt(t: t, open: open, power: power, keys: keys, screen: screen),
+      Device.popTilt => PopTiltArt(t: t, open: open, power: power, keys: keys, screen: screen),
+      Device.compact => CompactArt(t: t, open: open, power: power, keys: keys, screen: screen),
+      Device.taco => TacoArt(t: t, power: power, keys: keys, screen: screen),
+      Device.lipstick => LipstickArt(t: t, open: open, power: power, keys: keys, screen: screen),
+      Device.pager => PagerArt(t: t, open: open, power: power, keys: keys, screen: screen),
+      Device.cordless => CordlessArt(t: t, open: open, power: power, keys: keys, screen: screen),
+      Device.watch => WatchArt(t: t, power: power, keys: keys, screen: screen),
+      Device.rotator => RotatorArt(t: t, open: open, power: power, keys: keys, screen: screen),
+      Device.jelly => JellyArt(t: t, open: open, power: power, keys: keys, screen: screen),
+      Device.eggPet => EggPetArt(t: t, power: power, keys: keys, screen: screen),
+      Device.wideT9 => WideT9Art(t: t, power: power, keys: keys, screen: screen),
     };
     return SizedBox.fromSize(
       size: size,

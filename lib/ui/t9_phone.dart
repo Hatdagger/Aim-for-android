@@ -468,6 +468,25 @@ class _Timeline {
             splashEnd: 0.92, springs: true, cues: [(0.18, UiSound.land), (0.575, UiSound.beep), (0.78, UiSound.pop)]);
       case Device.pocketMail:
         return const _Timeline(springs: false, cues: [(0.34, UiSound.land), (0.66, UiSound.chirp)]);
+      case Device.swivel:
+        return const _Timeline(
+            ms: 1700, openA: 0.36, openB: 0.7, powerA: 0.7, powerB: 0.76, springs: true,
+            cues: [(0.36, UiSound.slide), (0.7, UiSound.chirp)]);
+      case Device.compact:
+      case Device.pager:
+        return const _Timeline(springs: true, cues: [(0.4, UiSound.flip), (0.66, UiSound.chirp)]);
+      case Device.popTilt:
+      case Device.rotator:
+      case Device.jelly:
+      case Device.cordless:
+      case Device.lipstick:
+        return const _Timeline(springs: true, cues: [(0.4, UiSound.slide), (0.66, UiSound.chirp)]);
+      case Device.taco:
+      case Device.watch:
+      case Device.wideT9:
+        return const _Timeline(springs: false, cues: [(0.34, UiSound.land), (0.66, UiSound.chirp)]);
+      case Device.eggPet:
+        return const _Timeline(springs: false, cues: [(0.34, UiSound.land), (0.66, UiSound.pop)]);
       case Device.phone:
       case Device.wideFlip:
         final springs = t.flip || letters;
@@ -569,7 +588,8 @@ class _CartoonPhoneState extends State<CartoonPhone> with SingleTickerProviderSt
     _sfx(switch (widget.theme.device) {
       Device.pocketBrick => UiSound.pixel,
       Device.dashboard => UiSound.jewel,
-      Device.musicPlayer => UiSound.tick,
+      Device.musicPlayer || Device.watch || Device.lipstick => UiSound.tick,
+      Device.eggPet => UiSound.pixel,
       _ => UiSound.key,
     });
   }
@@ -633,7 +653,11 @@ class _CartoonPhoneState extends State<CartoonPhone> with SingleTickerProviderSt
 
   void _press(String k) {
     if (!widget.qwerty) {
-      _engine.press(k);
+      if (k == 'space') {
+        _engine.space();
+      } else {
+        _engine.press(k);
+      }
       return;
     }
     switch (k) {
@@ -730,7 +754,8 @@ class _CartoonPhoneState extends State<CartoonPhone> with SingleTickerProviderSt
       _sfx(switch (widget.theme.device) {
         Device.pocketBrick => UiSound.navPixel,
         Device.dashboard => UiSound.navJewel,
-        Device.musicPlayer => UiSound.navWheel,
+        Device.musicPlayer || Device.lipstick => UiSound.navWheel,
+        Device.eggPet => UiSound.navPixel,
         _ => UiSound.navKey,
       });
       return false;
