@@ -13,6 +13,8 @@ An old-school AIM client with modern behaviour, for servers running
   away messages, typing indicator.
 - Controller support (Steam Deck, ROG Ally, XInput, Android pads) with a T9 phone
   keypad that docks beside the chat — predictive or multi-tap, in several phone styles.
+  Full screen (Prefs, or the button over the phone) makes the phone fill the whole screen
+  with big stretched keys for comfortable touch typing.
 - Gadget keyboards: a wide flip phone that opens sideways to a keyboard, a glowing console
   keyboard under a tube TV that switches on like a CRT, a thumb-keyboard "pocket mail" phone,
   a click-wheel music player whose keyboard slides up over the wheel, and a green-screen

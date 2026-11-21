@@ -12,6 +12,7 @@ import '../app/platform_bridge.dart';
 import '../app/settings.dart';
 import '../app/t9.dart';
 import '../app/ui_sounds.dart';
+import 'full_phone_art.dart';
 import 'phone_art.dart';
 import 'phone_theme.dart';
 import 'retro.dart';
@@ -158,8 +159,21 @@ class _OskHostState extends State<OskHost> {
       final qwerty = theme.letters(kind == 'qwerty');
       final art = PhoneArt.sizeFor(theme, qwerty);
       final aspect = art.width / art.height;
+      void leaveFull() {
+        if (landscape) {
+          s.phoneFullLandscape = false;
+        } else {
+          s.phoneFullPortrait = false;
+        }
+      }
+
       final phone = CartoonPhone(
-          key: ValueKey('${identityHashCode(req)}-$kind-${theme.id}'), request: req, theme: theme, qwerty: qwerty);
+          key: ValueKey('${identityHashCode(req)}-$kind-${theme.id}-$full'),
+          request: req,
+          theme: theme,
+          qwerty: qwerty,
+          fill: full,
+          onShowChat: full ? leaveFull : null);
 
       Widget fullToggle(bool on) => Tooltip(
             message: on ? 'Show the chat behind the phone' : 'Phone fills the screen',
@@ -178,20 +192,14 @@ class _OskHostState extends State<OskHost> {
           );
 
       // ---------------------------------------------------- full screen
+      // The phone fills the whole screen edge to edge and its keys stretch to
+      // use all of it (big keys for touch typing). Its "Show chat" key leaves.
       if (full) {
-        const pad = 10.0, top = 52.0;
-        var w = W - pad * 2;
-        var h = w / aspect;
-        if (h > H - top - pad) {
-          h = H - top - pad;
-          w = h * aspect;
-        }
         return Stack(children: [
           Positioned.fill(child: widget.child),
           // Chat hidden behind a heavy blur + tint (the phone's screen shows it).
-          const Positioned.fill(child: _Backdrop(sigma: 22, tint: Color(0xB3101820))),
-          Positioned(left: (W - w) / 2, top: top + (H - top - pad - h) / 2, width: w, height: h, child: phone),
-          Positioned(left: 8, top: 8, child: SafeArea(child: fullToggle(true))),
+          const Positioned.fill(child: _Backdrop(sigma: 22, tint: Color(0xE6101820))),
+          Positioned.fill(child: SafeArea(child: Padding(padding: const EdgeInsets.all(4), child: phone))),
         ]);
       }
 
@@ -478,7 +486,12 @@ class CartoonPhone extends StatefulWidget {
   final OskRequest request;
   final PhoneTheme theme;
   final bool qwerty;
-  const CartoonPhone({super.key, required this.request, required this.theme, required this.qwerty});
+
+  /// Full screen: lay the phone out to fill all the space it's given.
+  final bool fill;
+  final VoidCallback? onShowChat;
+  const CartoonPhone(
+      {super.key, required this.request, required this.theme, required this.qwerty, this.fill = false, this.onShowChat});
 
   @override
   State<CartoonPhone> createState() => _CartoonPhoneState();
@@ -796,6 +809,24 @@ class _CartoonPhoneState extends State<CartoonPhone> with SingleTickerProviderSt
           final squash = springs ? 1.0 : 1 - 0.07 * sin(pi * _seg(v, 0.34, 0.56));
           final power = _seg(v, tl.powerA, tl.powerB);
           final splash = v < tl.splashEnd;
+          final screen = splash
+              ? (t.device == Device.pocketBrick
+                  ? _ScrollSplash(t: t, scroll: Curves.linear.transform(_seg(v, tl.scrollA, tl.scrollB)))
+                  : _Splash(t: t))
+              : _screen(t, _seg(v, tl.splashEnd, 1));
+          if (widget.fill) {
+            return FractionalTranslation(
+              translation: Offset(0, (1 - rise) * 1.15),
+              child: FullPhoneArt(
+                t: t,
+                letters: widget.qwerty,
+                power: power,
+                keys: keys,
+                screen: screen,
+                onShowChat: widget.onShowChat,
+              ),
+            );
+          }
           return FractionalTranslation(
             translation: Offset(0, (1 - rise) * 1.15),
             child: FittedBox(
@@ -807,11 +838,7 @@ class _CartoonPhoneState extends State<CartoonPhone> with SingleTickerProviderSt
                 squash: squash,
                 power: power,
                 keys: keys,
-                screen: splash
-                    ? (t.device == Device.pocketBrick
-                        ? _ScrollSplash(t: t, scroll: Curves.linear.transform(_seg(v, tl.scrollA, tl.scrollB)))
-                        : _Splash(t: t))
-                    : _screen(t, _seg(v, tl.splashEnd, 1)),
+                screen: screen,
               ),
             ),
           );
