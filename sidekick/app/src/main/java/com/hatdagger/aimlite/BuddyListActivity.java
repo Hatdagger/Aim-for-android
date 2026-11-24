@@ -8,6 +8,7 @@ import android.content.res.Configuration;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.os.Bundle;
+import android.view.Gravity;
 import android.view.KeyEvent;
 import android.view.Menu;
 import android.view.MenuItem;
@@ -17,6 +18,7 @@ import android.widget.AdapterView;
 import android.widget.BaseAdapter;
 import android.widget.Button;
 import android.widget.EditText;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ListView;
 import android.widget.TextView;
@@ -109,7 +111,8 @@ public final class BuddyListActivity extends Activity {
 
         // AIM's strip of buttons: under the list upright, down the right side sideways.
         bar = Ui.row(this);
-        bar.addView(barButton("IM", new View.OnClickListener() {
+        bar.setBackgroundColor(Ui.FACE);
+        bar.addView(picto(R.drawable.ic_bar_im, "IM", new View.OnClickListener() {
             public void onClick(View v) {
                 Ui.ask(BuddyListActivity.this, "Send Instant Message", "Screen name", "", new Ui.OnText() {
                     public void text(String s) {
@@ -117,22 +120,27 @@ public final class BuddyListActivity extends Activity {
                     }
                 });
             }
-        }), Ui.weight(1));
-        bar.addView(barButton("Chat", new View.OnClickListener() {
+        }));
+        bar.addView(picto(R.drawable.ic_bar_chat, "Chat", new View.OnClickListener() {
             public void onClick(View v) {
                 chatDialog();
             }
-        }), Ui.weight(1));
-        bar.addView(barButton("Away", new View.OnClickListener() {
+        }));
+        bar.addView(picto(R.drawable.ic_bar_info, "Info", new View.OnClickListener() {
+            public void onClick(View v) {
+                profileDialog();
+            }
+        }));
+        bar.addView(picto(R.drawable.ic_bar_away, "Away", new View.OnClickListener() {
             public void onClick(View v) {
                 awayDialog();
             }
-        }), Ui.weight(1));
-        bar.addView(barButton("Add", new View.OnClickListener() {
+        }));
+        bar.addView(picto(R.drawable.ic_bar_setup, "Setup", new View.OnClickListener() {
             public void onClick(View v) {
-                addDialog("");
+                setupMenu();
             }
-        }), Ui.weight(1));
+        }));
         middle.addView(bar);
         arrange(getResources().getConfiguration().orientation);
         setContentView(root);
@@ -147,7 +155,7 @@ public final class BuddyListActivity extends Activity {
                 ? new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.FILL_PARENT, 1f)
                 : new LinearLayout.LayoutParams(ViewGroup.LayoutParams.FILL_PARENT, 0, 1f));
         bar.setLayoutParams(wide
-                ? new LinearLayout.LayoutParams(Ui.dp(this, 96), ViewGroup.LayoutParams.FILL_PARENT)
+                ? new LinearLayout.LayoutParams(Ui.dp(this, 72), ViewGroup.LayoutParams.FILL_PARENT)
                 : new LinearLayout.LayoutParams(ViewGroup.LayoutParams.FILL_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         for (int i = 0; i < bar.getChildCount(); i++) {
             bar.getChildAt(i).setLayoutParams(wide
@@ -163,10 +171,45 @@ public final class BuddyListActivity extends Activity {
         arrange(c.orientation);
     }
 
-    private Button barButton(String text, View.OnClickListener l) {
-        Button b = Ui.button(this, text);
-        b.setOnClickListener(l);
-        return b;
+    /** One picture button, like the main app's: the picture with its name under it. */
+    private View picto(int image, String label, View.OnClickListener l) {
+        LinearLayout v = Ui.column(this);
+        v.setGravity(Gravity.CENTER);
+        v.setBackgroundResource(android.R.drawable.list_selector_background);
+        int p = Ui.dp(this, 3);
+        v.setPadding(p, p, p, p);
+        ImageView img = new ImageView(this);
+        img.setImageResource(image);
+        v.addView(img);
+        TextView t = Ui.label(this, label);
+        t.setTextSize(12);
+        t.setGravity(Gravity.CENTER);
+        v.addView(t);
+        v.setClickable(true);
+        v.setFocusable(true);
+        v.setOnClickListener(l);
+        return v;
+    }
+
+    /** Setup: the things that don't need their own button. */
+    private void setupMenu() {
+        new AlertDialog.Builder(this).setTitle("Setup")
+                .setItems(new String[] {"Add Buddy", "Sign Off"}, new DialogInterface.OnClickListener() {
+                    public void onClick(DialogInterface d, int w) {
+                        if (w == 0) addDialog("");
+                        else confirmSignOff();
+                    }
+                }).show();
+    }
+
+    private void confirmSignOff() {
+        new AlertDialog.Builder(this).setTitle("Sign off?")
+                .setPositiveButton("Sign Off", new DialogInterface.OnClickListener() {
+                    public void onClick(DialogInterface d, int w) {
+                        app.signOff();
+                    }
+                })
+                .setNegativeButton("Cancel", null).show();
     }
 
     @Override
@@ -513,7 +556,7 @@ public final class BuddyListActivity extends Activity {
         m.add(0, 2, 0, "Chat Room");
         m.add(0, 3, 0, "Away");
         m.add(0, 4, 0, "Add Buddy");
-        m.add(0, 5, 0, "Profile");
+        m.add(0, 5, 0, "My Info");
         m.add(0, 6, 0, "Sign Off");
         return true;
     }
@@ -541,13 +584,7 @@ public final class BuddyListActivity extends Activity {
                 profileDialog();
                 return true;
             case 6:
-                new AlertDialog.Builder(this).setTitle("Sign off?")
-                        .setPositiveButton("Sign Off", new DialogInterface.OnClickListener() {
-                            public void onClick(DialogInterface d, int w) {
-                                app.signOff();
-                            }
-                        })
-                        .setNegativeButton("Cancel", null).show();
+                confirmSignOff();
                 return true;
             default:
                 return super.onOptionsItemSelected(item);
