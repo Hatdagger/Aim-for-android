@@ -3,6 +3,7 @@ import 'dart:math';
 
 import 'aim_html.dart';
 import 'bytes.dart';
+import 'chat_room.dart';
 import 'direct_connect.dart';
 import 'models.dart';
 import 'session.dart';
@@ -54,6 +55,38 @@ class OutboxChanged extends ClientEvent {
 class DirectConnectEvent extends ClientEvent {
   final DirectEvent event;
   DirectConnectEvent(this.event);
+}
+
+/// A chat room we're in (or want to be in: it rejoins after a dropped link).
+class ClientRoom {
+  RoomInfo info;
+  RoomConnection? conn;
+  Future<void>? _joining;
+  int _failures = 0;
+  Timer? _retry;
+  ClientRoom(this.info);
+
+  String get key => info.key;
+  String get name => info.name;
+  bool get isOpen => conn?.isOpen ?? false;
+  bool get isJoining => _joining != null || _retry != null;
+
+  /// Screen names in the room, sorted.
+  List<String> get members {
+    final m = conn?.members.values.map((u) => u.screenName).toList() ?? <String>[];
+    m.sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+    return m;
+  }
+}
+
+/// Something happened in a room (or it opened, closed or was left).
+class RoomUpdate extends ClientEvent {
+  final ClientRoom room;
+
+  /// null: the room just opened, or [left] is true.
+  final RoomEvent? event;
+  final bool left;
+  RoomUpdate(this.room, this.event, {this.left = false});
 }
 
 /// Keeps one screen name signed on: reconnects when the link drops, holds
@@ -111,6 +144,9 @@ class AimClient {
   final _events = StreamController<ClientEvent>.broadcast();
   final List<OutgoingMessage> outbox = [];
   final Map<String, DateTime> _lastAutoReply = {};
+
+  /// Rooms we're in, by [RoomInfo.key].
+  final Map<String, ClientRoom> rooms = {};
   int _idSeq = 0;
 
   Stream<ClientEvent> get events => _events.stream;
@@ -161,6 +197,7 @@ class AimClient {
         _attempt = 0;
         _setState(LinkState.online, null);
         _schedulePump(Duration.zero);
+        _rejoinRooms();
         result = await s.ended;
       } on OscarDisconnect catch (d) {
         result = d;
@@ -214,7 +251,15 @@ class AimClient {
     final w = _wake;
     if (w != null && !w.isCompleted) w.complete();
     await direct.closeAll();
+    for (final r in rooms.values) {
+      r._retry?.cancel();
+    }
+    final left = rooms.values.toList();
+    rooms.clear();
     await _session?.signOff();
+    for (final r in left) {
+      _emit(RoomUpdate(r, null, left: true));
+    }
     for (final m in outbox.where((m) => m.isPending).toList()) {
       m.status = OutboxStatus.cancelled;
       _emit(OutboxChanged(m));
@@ -390,6 +435,139 @@ class AimClient {
     } finally {
       _pumping = false;
     }
+  }
+
+  // ------------------------------------------------------------- chat rooms
+
+  /// Goes into the room called [name] (making it if needed). Returns its key.
+  Future<ClientRoom> joinRoom(String name) async {
+    final s = _session;
+    if (s == null || !isOnline) throw Exception('Not signed on');
+    final clean = cleanRoomName(name);
+    if (clean.isEmpty) throw Exception('Type a room name (letters and numbers).');
+    final already = rooms.values.where((r) => r.name.toLowerCase() == clean.toLowerCase()).firstOrNull;
+    if (already != null && already.isOpen) return already;
+    final info = await s.findOrCreateRoom(clean);
+    return _enter(info);
+  }
+
+  /// Goes into the room a buddy invited us to.
+  Future<ClientRoom> acceptRoomInvite(RoomInvite inv) {
+    if (!isOnline) throw Exception('Not signed on');
+    return _enter(inv.room);
+  }
+
+  Future<void> declineRoomInvite(RoomInvite inv) async {
+    final s = _session;
+    if (s == null || !s.isOnline) return;
+    try {
+      await s.declineRoomInvite(inv);
+    } catch (_) {}
+  }
+
+  Future<ClientRoom> _enter(RoomInfo info) async {
+    final r = rooms.putIfAbsent(info.key, () => ClientRoom(info));
+    r._failures = 0;
+    r._retry?.cancel();
+    r._retry = null;
+    await _connectRoom(r);
+    return r;
+  }
+
+  Future<void> _connectRoom(ClientRoom r) {
+    if (r.isOpen) return Future.value();
+    return r._joining ??= () async {
+      try {
+        final s = _session;
+        if (s == null || !s.isOnline) throw ConnectionClosed('not signed on');
+        final c = await s.joinRoom(r.info, (e) => _onRoomEvent(r, e));
+        if (!rooms.containsKey(r.key)) {
+          await c.leave(); // left while we were joining
+          return;
+        }
+        r.conn = c;
+        r.info = c.info;
+        r._failures = 0;
+        _emit(RoomUpdate(r, null));
+      } finally {
+        r._joining = null;
+      }
+    }();
+  }
+
+  void _onRoomEvent(ClientRoom r, RoomEvent e) {
+    if (e is RoomInfoChanged) r.info = r.conn?.info ?? r.info;
+    if (e is RoomClosed && rooms[r.key] == r) {
+      r.conn = null;
+      _scheduleRoomRetry(r);
+    }
+    if (rooms.containsKey(r.key)) _emit(RoomUpdate(r, e));
+  }
+
+  /// A room dropped on its own (main link still up): try again shortly.
+  /// If the whole session dropped, [_rejoinRooms] runs after reconnecting.
+  void _scheduleRoomRetry(ClientRoom r) {
+    if (!_wantOnline || r._retry != null) return;
+    final delay = backoff[min(r._failures, backoff.length - 1)];
+    r._failures++;
+    r._retry = Timer(delay, () {
+      r._retry = null;
+      if (rooms[r.key] != r || !isOnline || r.isOpen) return;
+      _connectRoom(r).catchError((Object _) {
+        if (rooms[r.key] == r && r._failures < 6) _scheduleRoomRetry(r);
+        _emit(RoomUpdate(r, RoomClosed('rejoin failed')));
+      });
+    });
+  }
+
+  void _rejoinRooms() {
+    for (final r in rooms.values.toList()) {
+      r._retry?.cancel();
+      r._retry = null;
+      r._failures = 0;
+      if (!r.isOpen) {
+        _connectRoom(r).catchError((Object _) => _scheduleRoomRetry(r));
+      }
+    }
+  }
+
+  Future<void> leaveRoom(String key) async {
+    final r = rooms.remove(key);
+    if (r == null) return;
+    r._retry?.cancel();
+    final c = r.conn;
+    r.conn = null;
+    _emit(RoomUpdate(r, null, left: true));
+    await c?.leave();
+  }
+
+  /// Says [text] in the room. False when the room isn't connected right now.
+  bool sendToRoom(String key, String text) {
+    final c = rooms[key]?.conn;
+    if (c == null || !c.isOpen) return false;
+    try {
+      c.send(text);
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Invites buddies into a room. Returns the ones it couldn't reach.
+  Future<List<String>> inviteToRoom(String key, List<String> who, String message) async {
+    final s = _session;
+    final r = rooms[key];
+    if (s == null || !s.isOnline || r == null) throw Exception('Not signed on');
+    final failed = <String>[];
+    for (final sn in who) {
+      try {
+        final res = await s.sendRoomInvite(sn, r.info, message);
+        if (res != SendResult.delivered) failed.add(sn);
+      } catch (_) {
+        failed.add(sn);
+      }
+    }
+    return failed;
   }
 
   /// Simulate a dropped network (tests).

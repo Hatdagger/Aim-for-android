@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 
 import '../oscar/aim_html.dart';
 import '../oscar/bytes.dart';
+import '../oscar/chat_room.dart';
 import '../oscar/client.dart';
 import '../oscar/direct_connect.dart';
 import '../oscar/odc.dart';
@@ -27,6 +28,23 @@ class Conversation {
   int unread = 0;
   int typing = 0; // 0 none, 1 paused, 2 typing
   Conversation(this.key, this.displayName);
+}
+
+/// A chat room as the app shows it.
+class RoomChat {
+  final String key;
+  ClientRoom room;
+  final List<ChatLine> lines = [];
+  int unread = 0;
+  bool wasOpen = false;
+  RoomChat(this.key, this.room);
+
+  String get name => room.name;
+  bool get isOpen => room.isOpen;
+  List<String> get members => room.members;
+
+  /// Per-room settings (keyboard, wallpaper) are stored under this name.
+  String get settingsKey => 'room:$key';
 }
 
 class BuddyView {
@@ -170,6 +188,9 @@ class AppState extends ChangeNotifier {
         }
       } catch (_) {}
     }
+    rooms.clear();
+    roomInvites.clear();
+    openRoom = null;
     _sub = c.events.listen(_onClientEvent);
     c.start();
     unawaited(PlatformBridge.requestNotificationPermission());
@@ -207,6 +228,9 @@ class AppState extends ChangeNotifier {
     buddyIcons.clear();
     _buddyIconHash.clear();
     directProgress.clear();
+    rooms.clear();
+    roomInvites.clear();
+    openRoom = null;
     openChat = null;
     everOnline = false;
     awayIsAuto = false;
@@ -235,6 +259,8 @@ class AppState extends ChangeNotifier {
         _onSession(event);
       case DirectConnectEvent(:final event):
         _onDirect(event);
+      case RoomUpdate():
+        _onRoom(e);
     }
     notifyListeners();
   }
@@ -285,6 +311,8 @@ class AppState extends ChangeNotifier {
         if (c != null) c.typing = state;
       case BuddyListChanged():
       case SelfInfoChanged():
+      case RoomInviteReceived(:final invite):
+        _onRoomInvite(invite);
       case RendezvousReceived():
         break;
     }
@@ -338,6 +366,146 @@ class AppState extends ChangeNotifier {
         }
       }
     }
+  }
+
+  // --------------------------------------------------------------- chat rooms
+
+  /// Rooms we're in, newest first.
+  final Map<String, RoomChat> rooms = {};
+
+  /// Invites waiting for Join / No thanks.
+  final List<RoomInvite> roomInvites = [];
+
+  /// Key of the room being viewed.
+  String? openRoom;
+
+  void _onRoomInvite(RoomInvite inv) {
+    if (isBlocked(inv.from)) return;
+    if (rooms[inv.room.key]?.isOpen ?? false) return;
+    roomInvites.removeWhere((i) => i.room.key == inv.room.key && normalizeSn(i.from) == normalizeSn(inv.from));
+    roomInvites.insert(0, inv);
+    if (foreground) {
+      sounds.play(SoundEvent.firstIm);
+    } else {
+      _backgroundUnread++;
+      PlatformBridge.showUnread(_backgroundUnread);
+    }
+  }
+
+  RoomChat _roomChat(ClientRoom r) {
+    final rc = rooms.putIfAbsent(r.key, () => RoomChat(r.key, r));
+    rc.room = r;
+    return rc;
+  }
+
+  void _roomNote(RoomChat rc, String text) =>
+      rc.lines.add(ChatLine('', text, DateTime.now(), mine: false, system: true));
+
+  void _onRoom(RoomUpdate u) {
+    if (u.left) {
+      rooms.remove(u.room.key);
+      if (openRoom == u.room.key) openRoom = null;
+      return;
+    }
+    final rc = _roomChat(u.room);
+    final me = normalizeSn(myScreenName);
+    switch (u.event) {
+      case null:
+        if (!rc.wasOpen) {
+          _roomNote(rc, rc.lines.isEmpty ? 'You are in "${rc.name}".' : 'Back in the room.');
+        }
+        rc.wasOpen = true;
+      case RoomMembersChanged(:final joined, :final left, :final initial):
+        if (initial) return;
+        for (final sn in joined) {
+          if (normalizeSn(sn) != me) _roomNote(rc, '$sn entered the room.');
+        }
+        for (final sn in left) {
+          if (normalizeSn(sn) != me) _roomNote(rc, '$sn left the room.');
+        }
+      case RoomMessageReceived(:final message):
+        if (normalizeSn(message.from) == me) return;
+        final (fg, bg) = aimHtmlColors(message.html);
+        rc.lines.add(ChatLine(message.from, message.text, message.time, mine: false, fg: fg, bg: bg));
+        final viewing = foreground && openRoom == rc.key;
+        if (!viewing) rc.unread++;
+        if (foreground) sounds.play(SoundEvent.imReceived);
+      case RoomClosed():
+        if (rc.wasOpen && link == LinkState.online) {
+          _roomNote(rc, 'Lost the connection to the room. Rejoining…');
+        }
+        rc.wasOpen = false;
+      case RoomInfoChanged():
+        break;
+    }
+  }
+
+  /// Goes into [name] (made if new) and invites [invite] there.
+  Future<String> joinRoom(String name, {List<String> invite = const [], String message = ''}) async {
+    final c = client;
+    if (c == null) throw Exception('Not signed on');
+    final r = await c.joinRoom(name);
+    _roomChat(r);
+    roomInvites.removeWhere((i) => i.room.key == r.key);
+    notifyListeners();
+    if (invite.isNotEmpty) await inviteToRoom(r.key, invite, message);
+    return r.key;
+  }
+
+  /// Returns the buddies the invite couldn't reach.
+  Future<List<String>> inviteToRoom(String key, List<String> who, String message) async {
+    final c = client;
+    if (c == null) throw Exception('Not signed on');
+    final text = message.trim().isEmpty ? 'Join me in this Buddy Chat.' : message.trim();
+    final failed = await c.inviteToRoom(key, who, text);
+    final rc = rooms[key];
+    final sent = who.where((w) => !failed.contains(w)).toList();
+    if (rc != null && sent.isNotEmpty) _roomNote(rc, 'Invited ${sent.join(', ')}.');
+    notifyListeners();
+    return failed;
+  }
+
+  Future<String> acceptRoomInvite(RoomInvite inv) async {
+    final c = client;
+    if (c == null) throw Exception('Not signed on');
+    final r = await c.acceptRoomInvite(inv);
+    _roomChat(r);
+    roomInvites.removeWhere((i) => i.room.key == r.key);
+    notifyListeners();
+    return r.key;
+  }
+
+  void declineRoomInvite(RoomInvite inv) {
+    roomInvites.remove(inv);
+    unawaited(client?.declineRoomInvite(inv));
+    notifyListeners();
+  }
+
+  Future<void> leaveRoom(String key) async {
+    rooms.remove(key);
+    if (openRoom == key) openRoom = null;
+    notifyListeners();
+    await client?.leaveRoom(key);
+  }
+
+  void sendToRoom(String key, String text) {
+    final rc = rooms[key];
+    final t = text.trim();
+    if (rc == null || t.isEmpty) return;
+    if (client?.sendToRoom(key, t) ?? false) {
+      rc.lines.add(ChatLine(myScreenName, t, DateTime.now(),
+          mine: true, fg: settings.myTextColor, bg: settings.myBackColor));
+      sounds.play(SoundEvent.imSent);
+    } else {
+      _roomNote(rc, 'Not sent: not connected to the room right now.');
+    }
+    notifyListeners();
+  }
+
+  void openRoomChat(String? key) {
+    openRoom = key;
+    if (key != null) rooms[key]?.unread = 0;
+    notifyListeners();
   }
 
   // --------------------------------------------------------------- direct connect
@@ -676,6 +844,7 @@ class AppState extends ChangeNotifier {
       _backgroundUnread = 0;
       PlatformBridge.clearUnread();
       if (openChat != null) conversations[openChat!]?.unread = 0;
+      if (openRoom != null) rooms[openRoom!]?.unread = 0;
       if (awayIsAuto) setAway(null);
       client?.retryNow();
     } else {
@@ -693,5 +862,8 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
-  int get totalUnread => conversations.values.fold(0, (a, c) => a + c.unread);
+  int get totalUnread =>
+      conversations.values.fold(0, (a, c) => a + c.unread) +
+      rooms.values.fold(0, (a, r) => a + r.unread) +
+      roomInvites.length;
 }

@@ -6,8 +6,10 @@ import '../oscar/aim_html.dart';
 import '../oscar/bytes.dart';
 import '../oscar/client.dart';
 import '../oscar/models.dart';
+import '../oscar/chat_room.dart';
 import 'profile_screen.dart';
 import 'retro.dart';
+import 'room.dart';
 import 'update_button.dart';
 import 'retro_text_field.dart';
 import 'settings_screen.dart';
@@ -17,7 +19,10 @@ import 'sign_up.dart';
 /// side window (wide screens) or as a new page (phones).
 class BuddyListPane extends StatefulWidget {
   final void Function(String screenName) onOpenChat;
-  const BuddyListPane({super.key, required this.onOpenChat});
+
+  /// Opens a chat room window (by room key).
+  final void Function(String roomKey) onOpenRoom;
+  const BuddyListPane({super.key, required this.onOpenChat, required this.onOpenRoom});
 
   @override
   State<BuddyListPane> createState() => _BuddyListPaneState();
@@ -84,6 +89,23 @@ class _BuddyListPaneState extends State<BuddyListPane> {
     final children = <Widget>[];
     var first = true;
 
+    // Chat rooms you're in and invites waiting, at the very top.
+    if (app.rooms.isNotEmpty || app.roomInvites.isNotEmpty) {
+      const name = 'Chat Rooms';
+      final unread = app.roomInvites.length + app.rooms.values.fold(0, (a, r) => a + r.unread);
+      children.add(_groupHeader(name, 0, app.rooms.length + app.roomInvites.length,
+          autofocus: true, showCount: false, unread: unread));
+      first = false;
+      if (!_collapsed.contains(name)) {
+        for (final inv in app.roomInvites) {
+          children.add(_inviteRow(app, inv));
+        }
+        for (final r in app.rooms.values) {
+          children.add(_roomRow(app, r));
+        }
+      }
+    }
+
     // People who messaged you but are not on your Buddy List get their own
     // group at the top, so the one list is also the list of chats.
     final known = {for (final (_, bs) in groups) for (final b in bs) normalizeSn(b.screenName)};
@@ -92,7 +114,7 @@ class _BuddyListPaneState extends State<BuddyListPane> {
     if (strangers.isNotEmpty) {
       const name = 'Not on My List';
       children.add(_groupHeader(name, 0, strangers.length,
-          autofocus: true, showCount: false, unread: strangers.fold(0, (a, c) => a + c.unread)));
+          autofocus: first, showCount: false, unread: strangers.fold(0, (a, c) => a + c.unread)));
       first = false;
       if (!_collapsed.contains(name)) {
         for (final c in strangers) {
@@ -335,6 +357,129 @@ class _BuddyListPaneState extends State<BuddyListPane> {
     );
   }
 
+  // ---------------------------------------------------------------- chat rooms
+
+  Widget _inviteRow(AppState app, RoomInvite inv) => RetroListTile(
+        onTap: () => _inviteDialog(app, inv),
+        child: Row(children: [
+          const Icon(Icons.mark_email_unread, size: 22, color: Color(0xFFB00000)),
+          const SizedBox(width: 6),
+          Expanded(
+            child: Text('${inv.from} invited you to ${inv.room.name}',
+                maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.bold)),
+          ),
+          const UnreadBadge(1),
+        ]),
+      );
+
+  Widget _roomRow(AppState app, RoomChat r) => RetroListTile(
+        onTap: () => widget.onOpenRoom(r.key),
+        child: Row(children: [
+          Icon(Icons.forum, size: 22, color: r.isOpen ? const Color(0xFF7A4FD0) : Retro.shadow),
+          const SizedBox(width: 6),
+          Expanded(
+            child: Text(r.name,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(fontWeight: r.unread > 0 ? FontWeight.bold : FontWeight.normal)),
+          ),
+          Text(r.isOpen ? '(${r.members.length})' : '(joining)',
+              style: const TextStyle(fontSize: 12, color: Retro.shadow)),
+          if (r.unread > 0) Padding(padding: const EdgeInsets.only(left: 6), child: UnreadBadge(r.unread)),
+          IconButton(
+            tooltip: 'More for ${r.name}',
+            visualDensity: VisualDensity.compact,
+            iconSize: 18,
+            onPressed: () => _roomMenu(app, r),
+            icon: const Icon(Icons.more_vert),
+          ),
+        ]),
+      );
+
+  void _inviteDialog(AppState app, RoomInvite inv) {
+    showRetroDialog<void>(context, title: 'Buddy Chat Invitation', builder: (ctx) {
+      return Column(crossAxisAlignment: CrossAxisAlignment.stretch, mainAxisSize: MainAxisSize.min, children: [
+        Text('${inv.from} invited you to the chat room "${inv.room.name}".',
+            style: const TextStyle(fontWeight: FontWeight.bold)),
+        if (inv.message.isNotEmpty) ...[
+          const SizedBox(height: 6),
+          Sunken(padding: const EdgeInsets.all(6), child: Text(inv.message)),
+        ],
+        const SizedBox(height: 10),
+        RetroButton(
+          autofocus: true,
+          isDefault: true,
+          onPressed: () {
+            Navigator.of(ctx).pop();
+            _try('Chat', () async {
+              final key = await app.acceptRoomInvite(inv);
+              widget.onOpenRoom(key);
+            });
+          },
+          child: const Text('Join'),
+        ),
+        const SizedBox(height: 4),
+        RetroButton(
+          onPressed: () {
+            Navigator.of(ctx).pop();
+            app.declineRoomInvite(inv);
+          },
+          child: const Text('No thanks'),
+        ),
+        const SizedBox(height: 4),
+        RetroButton(onPressed: () => Navigator.of(ctx).pop(), child: const Text('Decide later')),
+      ]);
+    });
+  }
+
+  void _roomMenu(AppState app, RoomChat r) {
+    showRetroDialog<void>(context, title: r.name, builder: (ctx) {
+      Widget b(String label, VoidCallback f, {bool autofocus = false}) => Padding(
+            padding: const EdgeInsets.only(bottom: 4),
+            child: RetroButton(
+              autofocus: autofocus,
+              onPressed: () {
+                Navigator.of(ctx).pop();
+                f();
+              },
+              child: Text(label),
+            ),
+          );
+      return Column(crossAxisAlignment: CrossAxisAlignment.stretch, mainAxisSize: MainAxisSize.min, children: [
+        b('Open', () => widget.onOpenRoom(r.key), autofocus: true),
+        b('Invite buddies…', () => showRoomInviteDialog(context, r)),
+        b('Leave the room', () => app.leaveRoom(r.key)),
+        RetroButton(onPressed: () => Navigator.of(ctx).pop(), child: const Text('Cancel')),
+      ]);
+    });
+  }
+
+  /// Chat ▸ "Buddy Chat": name a room (new or existing) and invite buddies.
+  Future<void> _chatDialog(AppState app) async {
+    final name = TextEditingController(text: '${app.myScreenName.replaceAll(' ', '')}Chat${100 + DateTime.now().millisecond % 900}');
+    final go = await showRetroDialog<bool>(context, title: 'Chat Room', builder: (ctx) {
+      return Column(crossAxisAlignment: CrossAxisAlignment.stretch, mainAxisSize: MainAxisSize.min, children: [
+        const Text('Type a room name. If the room already exists you join it; otherwise it\'s made for you.'),
+        const SizedBox(height: 6),
+        RetroTextField(controller: name, hint: 'Room name', autofocus: true, onSubmitted: (_) => Navigator.pop(ctx, true)),
+        const SizedBox(height: 8),
+        RetroButton(isDefault: true, onPressed: () => Navigator.pop(ctx, true), child: const Text('Go')),
+        const SizedBox(height: 6),
+        RetroButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+      ]);
+    });
+    if (go != true || !mounted) return;
+    await _try('Chat', () async {
+      final key = await app.joinRoom(name.text);
+      if (!mounted) return;
+      widget.onOpenRoom(key);
+      final room = app.rooms[key];
+      if (room != null && room.members.length <= 1 && mounted) {
+        // A brand-new room: offer to invite people straight away, like AIM.
+        await showRoomInviteDialog(context, room);
+      }
+    });
+  }
+
   String _idle(int m) => m < 60 ? '(${m}m)' : '(${m ~/ 60}h)';
 
   /// Menu for someone who messaged you but is not on your Buddy List.
@@ -375,6 +520,16 @@ class _BuddyListPaneState extends State<BuddyListPane> {
               color: const Color(0xFFF2C230),
               label: 'IM',
               onTap: () => _sendIm(),
+            ),
+          ),
+          Expanded(
+            child: Pictogram(
+              icon: Icons.forum,
+              color: const Color(0xFF7A4FD0),
+              label: 'Chat',
+              onTap: () => app.link == LinkState.online
+                  ? _chatDialog(app)
+                  : showRetroMessage(context, 'Chat', 'Chat rooms need a connection. Try again once you\'re signed on.'),
             ),
           ),
           Expanded(

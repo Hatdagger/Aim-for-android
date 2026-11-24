@@ -7,6 +7,7 @@ import 'package:crypto/crypto.dart';
 
 import 'aim_html.dart';
 import 'bytes.dart';
+import 'chat_room.dart';
 import 'flap.dart';
 import 'models.dart';
 import 'rendezvous.dart';
@@ -44,6 +45,12 @@ class RendezvousReceived extends OscarEvent {
   final String from;
   final Rendezvous rdv;
   RendezvousReceived(this.from, this.rdv);
+}
+
+/// A buddy invited us into a chat room.
+class RoomInviteReceived extends OscarEvent {
+  final RoomInvite invite;
+  RoomInviteReceived(this.invite);
 }
 
 class SelfInfoChanged extends OscarEvent {
@@ -424,7 +431,12 @@ class OscarSession {
       final data = r.tlvs()[0x0005];
       if (data == null || data.value.length < 26) return;
       final rdv = Rendezvous.parse(data.value);
-      if (rdv.isDirectIm) _emit(RendezvousReceived(info.screenName, rdv));
+      if (rdv.isDirectIm) {
+        _emit(RendezvousReceived(info.screenName, rdv));
+      } else {
+        final inv = RoomInvite.fromRendezvous(info.screenName, rdv);
+        if (inv != null) _emit(RoomInviteReceived(inv));
+      }
       return;
     }
     if (channel != 1) return;
@@ -488,6 +500,11 @@ class OscarSession {
     if (_ended.isCompleted) return;
     _ended.complete(d);
     _bart?.debugKill();
+    _nav?.debugKill();
+    for (final r in _rooms.toList()) {
+      r.debugKill();
+    }
+    _rooms.clear();
     _events.close();
   }
 
@@ -942,33 +959,58 @@ class OscarSession {
 
   // ---------------------------------------------------------------- buddy icons
 
+  /// Asks the main connection for another service (buddy icons, chat
+  /// rooms...), connects to it and does the handshake. The caller listens
+  /// for what it needs, then calls [_serviceReady].
+  Future<FlapConnection> _openService(int family, List<(int, int)> families, {Uint8List? roomRef}) async {
+    final bos = _requireBos();
+    final id = bos.nextReqId();
+    final f = bos.expect(const [(0x0001, 0x0005), (0x0001, 0x0001)], reqId: id);
+    final w = ByteWriter()..u16(family);
+    if (roomRef != null) w.tlv(0x0001, roomRef);
+    bos.sendSnac(0x0001, 0x0004, w.toBytes(), reqId: id);
+    final s = await f;
+    if (s.subtype != 0x0005) throw ServiceUnavailable(family);
+    final t = s.reader.tlvs();
+    final addr = t[0x0005]?.asString;
+    final cookie = t[0x0006]?.value;
+    if (addr == null || cookie == null) throw ServiceUnavailable(family);
+    final c = await _connectService(_redirectTarget(addr), Uint8List.fromList(cookie));
+    try {
+      await _negotiate(c, families);
+    } catch (_) {
+      c.debugKill();
+      rethrow;
+    }
+    return c;
+  }
+
+  void _serviceReady(FlapConnection c, List<(int, int)> families) {
+    final ready = ByteWriter();
+    for (final f in families) {
+      ready
+        ..u16(f.$1)
+        ..u16(f.$2)
+        ..u16(0x0110)
+        ..u16(0x08e5);
+    }
+    c.sendSnac(0x0001, 0x0002, ready.toBytes());
+    c.startKeepAlive();
+  }
+
   Future<FlapConnection> _bartConn() {
     final existing = _bart;
     if (existing != null && !existing.isClosed) return Future.value(existing);
     return _bartConnecting ??= () async {
       try {
-        final bos = _requireBos();
-        final f = bos.expect(const [(0x0001, 0x0005), (0x0001, 0x0001)]);
-        bos.sendSnac(0x0001, 0x0004, (ByteWriter()..u16(0x0010)).toBytes());
-        final s = await f;
-        if (s.subtype != 0x0005) throw Exception('Buddy icon service unavailable');
-        final t = s.reader.tlvs();
-        final addr = t[0x0005]?.asString;
-        final cookie = t[0x0006]?.value;
-        if (addr == null || cookie == null) throw Exception('Buddy icon service unavailable');
-        final c = await _connectService(_redirectTarget(addr), Uint8List.fromList(cookie));
-        await _negotiate(c, const [(0x0001, 4), (0x0010, 1)]);
-        final ready = ByteWriter()
-          ..u16(0x0001)
-          ..u16(4)
-          ..u16(0x0110)
-          ..u16(0x08e5)
-          ..u16(0x0010)
-          ..u16(1)
-          ..u16(0x0110)
-          ..u16(0x08e5);
-        c.sendSnac(0x0001, 0x0002, ready.toBytes());
-        c.startKeepAlive();
+        const fams = [(0x0001, 4), (0x0010, 1)];
+        final FlapConnection c;
+        try {
+          c = await _openService(0x0010, fams);
+        } on ServiceUnavailable {
+          throw Exception('Buddy icon service unavailable');
+        }
+        _serviceReady(c, fams);
         _bart = c;
         return c;
       } finally {
@@ -976,6 +1018,89 @@ class OscarSession {
       }
     }();
   }
+
+  // ---------------------------------------------------------------- chat rooms
+
+  FlapConnection? _nav;
+  Future<FlapConnection>? _navConnecting;
+  final Set<RoomConnection> _rooms = {};
+
+  /// The chat navigation service: finds and makes rooms.
+  Future<FlapConnection> _navConn() {
+    final existing = _nav;
+    if (existing != null && !existing.isClosed) return Future.value(existing);
+    return _navConnecting ??= () async {
+      try {
+        const fams = [(0x0001, 4), (0x000d, 1)];
+        final FlapConnection c;
+        try {
+          c = await _openService(0x000d, fams);
+        } on ServiceUnavailable {
+          throw Exception('This server doesn\'t have chat rooms.');
+        }
+        _serviceReady(c, fams);
+        _nav = c;
+        return c;
+      } finally {
+        _navConnecting = null;
+      }
+    }();
+  }
+
+  /// Finds the Buddy Chat room called [name], making it if nobody has.
+  Future<RoomInfo> findOrCreateRoom(String name, {int exchange = privateExchange}) async {
+    final c = await _navConn();
+    final id = c.nextReqId();
+    final f = c.expect(const [(0x000d, 0x0009), (0x000d, 0x0001)], reqId: id);
+    final w = ByteWriter()
+      ..u16(exchange)
+      ..str8('create')
+      ..u16(0xffff)
+      ..u8(1)
+      ..u16(3)
+      ..tlvString(0x00d3, name)
+      ..tlvString(0x00d6, 'us-ascii')
+      ..tlvString(0x00d7, 'en');
+    c.sendSnac(0x000d, 0x0008, w.toBytes(), reqId: id);
+    final s = await f;
+    final info = s.subtype == 0x0009 ? s.reader.tlvs()[0x0004] : null;
+    if (info == null) throw Exception('The server couldn\'t open the room "$name".');
+    return RoomInfo.readFull(info.reader);
+  }
+
+  /// Goes into [room]. Everything that happens there goes to [onEvent],
+  /// starting with who is already inside.
+  Future<RoomConnection> joinRoom(RoomInfo room, void Function(RoomEvent) onEvent) async {
+    const fams = [(0x0001, 4), (0x000e, 1)];
+    final FlapConnection c;
+    try {
+      c = await _openService(0x000e, fams, roomRef: room.ref);
+    } on ServiceUnavailable {
+      throw Exception('That room is gone or the server won\'t let you in.');
+    }
+    if (_ended.isCompleted) {
+      c.debugKill();
+      throw ConnectionClosed('signed off');
+    }
+    late final RoomConnection rc;
+    rc = RoomConnection(room, c, (e) {
+      if (e is RoomClosed) _rooms.remove(rc);
+      onEvent(e);
+    });
+    _rooms.add(rc);
+    _serviceReady(c, fams);
+    return rc;
+  }
+
+  /// Invites [to] into [room] (only this small note goes through the server).
+  Future<SendResult> sendRoomInvite(String to, RoomInfo room, String message) {
+    final rnd = Random();
+    final cookie = Uint8List.fromList(List.generate(8, (_) => rnd.nextInt(256)));
+    return sendRendezvous(to, cookie, encodeRoomInvite(cookie, room, message));
+  }
+
+  Future<SendResult> declineRoomInvite(RoomInvite inv) =>
+      sendRendezvous(inv.from, inv.cookie, encodeRoomDecline(inv.cookie));
 
   /// Uploads our buddy icon and records it in the buddy list.
   Future<void> setBuddyIcon(Uint8List icon) async {
@@ -1038,6 +1163,10 @@ class OscarSession {
 
   Future<void> signOff() async {
     _signingOff = true;
+    for (final r in _rooms.toList()) {
+      await r.leave();
+    }
+    await _nav?.close();
     await _bart?.close();
     await _bos?.close();
     _end(const OscarDisconnect(DisconnectKind.userSignOff, 'Signed off'));
@@ -1045,7 +1174,19 @@ class OscarSession {
 
   /// Drops the network link without signing off (tests / simulated loss).
   void debugDropConnection() {
+    for (final r in _rooms.toList()) {
+      r.debugKill();
+    }
+    _nav?.debugKill();
     _bart?.debugKill();
     _bos?.debugKill();
   }
+}
+
+/// The server said no to a service request (or doesn't have the service).
+class ServiceUnavailable implements Exception {
+  final int family;
+  const ServiceUnavailable(this.family);
+  @override
+  String toString() => 'Service 0x${family.toRadixString(16)} unavailable';
 }

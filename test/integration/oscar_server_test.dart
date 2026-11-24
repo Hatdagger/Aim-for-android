@@ -4,6 +4,7 @@ import 'dart:typed_data';
 
 import 'package:aim_for_android/oscar/aim_html.dart';
 import 'package:aim_for_android/oscar/bytes.dart';
+import 'package:aim_for_android/oscar/chat_room.dart';
 import 'package:aim_for_android/oscar/client.dart';
 import 'package:aim_for_android/oscar/direct_connect.dart';
 import 'package:aim_for_android/oscar/odc.dart';
@@ -357,4 +358,77 @@ void main() {
     await a.dispose();
     await b.dispose();
   }, skip: skip, timeout: const Timeout(Duration(minutes: 3)));
+
+  test('chat rooms: make, invite, talk, members come and go, rejoin after a drop', () async {
+    final a = _client('dave');
+    final b = _client('erin');
+    a.start();
+    b.start();
+    await _online(a);
+    await _online(b);
+
+    Future<RoomEvent> roomEvent(AimClient c, bool Function(RoomEvent) test) async {
+      final e = await c.events
+          .firstWhere((e) => e is RoomUpdate && e.event != null && test(e.event!))
+          .timeout(const Duration(seconds: 20),
+              onTimeout: () => throw TestFailure('${c.screenName}: room event did not arrive'));
+      return (e as RoomUpdate).event!;
+    }
+
+    final name = 'Test Room ${DateTime.now().millisecondsSinceEpoch % 100000}';
+    final room = await a.joinRoom(name);
+    expect(room.isOpen, isTrue);
+    expect(room.name, name);
+    // dave sees himself in the room
+    await Future<void>.delayed(const Duration(milliseconds: 500));
+    expect(room.members.map(normalizeSn), contains('dave'));
+
+    // invite erin
+    final invited = b.events
+        .firstWhere((e) => e is SessionEvent && e.event is RoomInviteReceived)
+        .timeout(const Duration(seconds: 20));
+    final failed = await a.inviteToRoom(room.key, ['erin'], 'come in');
+    expect(failed, isEmpty);
+    final inv = ((await invited) as SessionEvent).event as RoomInviteReceived;
+    expect(inv.invite.message, 'come in');
+    expect(inv.invite.room.key, room.key);
+
+    // erin joins; dave sees her arrive
+    final arrived = roomEvent(a, (e) => e is RoomMembersChanged && e.joined.map(normalizeSn).contains('erin'));
+    final bRoom = await b.acceptRoomInvite(inv.invite);
+    await arrived;
+    expect(bRoom.isOpen, isTrue);
+
+    // talk both ways
+    var heard = roomEvent(b, (e) => e is RoomMessageReceived);
+    expect(a.sendToRoom(room.key, 'hi erin ☕'), isTrue);
+    var m = (await heard) as RoomMessageReceived;
+    expect(normalizeSn(m.message.from), 'dave');
+    expect(m.message.text, 'hi erin ☕');
+
+    heard = roomEvent(a, (e) => e is RoomMessageReceived);
+    expect(b.sendToRoom(bRoom.key, 'hey dave'), isTrue);
+    m = (await heard) as RoomMessageReceived;
+    expect(m.message.text, 'hey dave');
+
+    // erin's link drops: she rejoins the room by herself after reconnecting
+    final reopened = b.events
+        .firstWhere((e) => e is RoomUpdate && e.event == null && !e.left && e.room.isOpen)
+        .timeout(const Duration(seconds: 40));
+    b.debugDropConnection();
+    await reopened;
+    heard = roomEvent(b, (e) => e is RoomMessageReceived);
+    expect(a.sendToRoom(room.key, 'welcome back'), isTrue);
+    m = (await heard) as RoomMessageReceived;
+    expect(m.message.text, 'welcome back');
+
+    // erin leaves; dave sees it
+    final gone = roomEvent(a, (e) => e is RoomMembersChanged && e.left.map(normalizeSn).contains('erin'));
+    await b.leaveRoom(bRoom.key);
+    await gone;
+    expect(b.rooms, isEmpty);
+
+    await a.dispose();
+    await b.dispose();
+  }, skip: skip, timeout: t);
 }

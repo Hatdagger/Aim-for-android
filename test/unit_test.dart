@@ -2,6 +2,8 @@ import 'dart:typed_data';
 
 import 'package:aim_for_android/oscar/aim_html.dart';
 import 'package:aim_for_android/oscar/bytes.dart';
+import 'package:aim_for_android/oscar/chat_room.dart';
+import 'package:aim_for_android/oscar/rendezvous.dart';
 import 'package:aim_for_android/oscar/flap.dart';
 import 'package:aim_for_android/oscar/models.dart';
 import 'package:aim_for_android/oscar/session.dart';
@@ -100,5 +102,60 @@ void main() {
     expect(u.screenName, 'Alice');
     expect(u.isAway, isTrue);
     expect(u.iconHash![0], 0xab);
+  });
+
+  test('chat room: names from cookies, full room info', () {
+    expect(RoomInfo.nameFromCookie('4-0-Movie Night'), 'Movie Night');
+    expect(RoomInfo.nameFromCookie('4-0-a-b'), 'a-b');
+    expect(RoomInfo.nameFromCookie('weird'), 'weird');
+    expect(cleanRoomName('  hi ☕   there '), 'hi there');
+
+    final w = ByteWriter()
+      ..u16(4)
+      ..str8('4-0-lobby')
+      ..u16(0)
+      ..u8(2)
+      ..u16(2)
+      ..tlvU16(0x00c9, 15)
+      ..tlvString(0x00d3, 'Lobby');
+    final r = RoomInfo.readFull(ByteReader(w.toBytes()));
+    expect(r.exchange, 4);
+    expect(r.cookie, '4-0-lobby');
+    expect(r.name, 'Lobby');
+    expect(RoomInfo.readRef(ByteReader(r.ref)).cookie, '4-0-lobby');
+  });
+
+  test('chat room: message out and back in (ascii and unicode)', () {
+    for (final text in ['hello room <3', 'coffee ☕ time']) {
+      final out = encodeRoomMessage(textToAimHtml(text));
+      // What the server sends back: same cookie/channel, sender + message info.
+      final r = ByteReader(out);
+      final head = r.bytes(10);
+      final t = r.tlvs();
+      final sender = ByteWriter()
+        ..str8('Alice')
+        ..u16(0)
+        ..u16(0);
+      final incoming = ByteWriter()
+        ..bytes(head)
+        ..tlv(0x0003, sender.toBytes())
+        ..tlv(0x0005, t[0x0005]!.value);
+      final m = parseRoomMessage(incoming.toBytes())!;
+      expect(m.from, 'Alice');
+      expect(m.text, text);
+    }
+  });
+
+  test('chat room: invite round trip and decline', () {
+    final cookie = Uint8List.fromList(List.generate(8, (i) => i));
+    const room = RoomInfo(4, '4-0-Party', 0, 'Party');
+    final rdv = Rendezvous.parse(encodeRoomInvite(cookie, room, 'come hang out'));
+    expect(rdv.isDirectIm, isFalse);
+    final inv = RoomInvite.fromRendezvous('bob', rdv)!;
+    expect(inv.from, 'bob');
+    expect(inv.room.cookie, '4-0-Party');
+    expect(inv.room.name, 'Party');
+    expect(inv.message, 'come hang out');
+    expect(RoomInvite.fromRendezvous('bob', Rendezvous.parse(encodeRoomDecline(cookie))), isNull);
   });
 }
