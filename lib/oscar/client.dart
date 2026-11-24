@@ -5,6 +5,7 @@ import 'aim_html.dart';
 import 'bytes.dart';
 import 'chat_room.dart';
 import 'direct_connect.dart';
+import 'flap.dart' show ConnectionClosed;
 import 'models.dart';
 import 'session.dart';
 

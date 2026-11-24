@@ -92,7 +92,7 @@ class _BuddyListPaneState extends State<BuddyListPane> {
     // Chat rooms you're in and invites waiting, at the very top.
     if (app.rooms.isNotEmpty || app.roomInvites.isNotEmpty) {
       const name = 'Chat Rooms';
-      final unread = app.roomInvites.length + app.rooms.values.fold(0, (a, r) => a + r.unread);
+      final unread = app.roomInvites.length + app.rooms.values.fold<int>(0, (a, r) => a + r.unread);
       children.add(_groupHeader(name, 0, app.rooms.length + app.roomInvites.length,
           autofocus: true, showCount: false, unread: unread));
       first = false;

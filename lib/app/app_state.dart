@@ -309,10 +309,10 @@ class AppState extends ChangeNotifier {
       case TypingChanged(:final screenName, :final state):
         final c = conversations[normalizeSn(screenName)];
         if (c != null) c.typing = state;
-      case BuddyListChanged():
-      case SelfInfoChanged():
       case RoomInviteReceived(:final invite):
         _onRoomInvite(invite);
+      case BuddyListChanged():
+      case SelfInfoChanged():
       case RendezvousReceived():
         break;
     }
@@ -863,7 +863,7 @@ class AppState extends ChangeNotifier {
   }
 
   int get totalUnread =>
-      conversations.values.fold(0, (a, c) => a + c.unread) +
-      rooms.values.fold(0, (a, r) => a + r.unread) +
+      conversations.values.fold<int>(0, (a, c) => a + c.unread) +
+      rooms.values.fold<int>(0, (a, r) => a + r.unread) +
       roomInvites.length;
 }
