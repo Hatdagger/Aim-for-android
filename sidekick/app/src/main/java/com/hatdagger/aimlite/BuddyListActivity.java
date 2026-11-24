@@ -95,6 +95,29 @@ public final class BuddyListActivity extends Activity {
         list.setBackgroundColor(Color.WHITE);
         list.setCacheColorHint(Color.WHITE);
         list.setAdapter(adapter);
+        // The trackball: draw the selected row ourselves (navy bar, white text) instead of
+        // Android's highlight, which the white rows would cover up.
+        list.setSelector(new android.graphics.drawable.ColorDrawable(0));
+        list.setItemsCanFocus(false);
+        list.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+            public void onItemSelected(AdapterView<?> p, View v, int pos, long id) {
+                repaintRows();
+            }
+
+            public void onNothingSelected(AdapterView<?> p) {
+                repaintRows();
+            }
+        });
+        list.getViewTreeObserver().addOnTouchModeChangeListener(new android.view.ViewTreeObserver.OnTouchModeChangeListener() {
+            public void onTouchModeChanged(boolean touch) {
+                repaintRows();
+            }
+        });
+        list.setOnFocusChangeListener(new View.OnFocusChangeListener() {
+            public void onFocusChange(View v, boolean has) {
+                repaintRows();
+            }
+        });
         list.setOnItemClickListener(new AdapterView.OnItemClickListener() {
             public void onItemClick(AdapterView<?> p, View v, int pos, long id) {
                 tap(rows.get(pos));
@@ -175,7 +198,7 @@ public final class BuddyListActivity extends Activity {
     private View picto(int image, String label, View.OnClickListener l) {
         LinearLayout v = Ui.column(this);
         v.setGravity(Gravity.CENTER);
-        v.setBackgroundResource(android.R.drawable.list_selector_background);
+        v.setBackgroundDrawable(Ui.selectable(this));
         int p = Ui.dp(this, 3);
         v.setPadding(p, p, p, p);
         ImageView img = new ImageView(this);
@@ -356,6 +379,19 @@ public final class BuddyListActivity extends Activity {
         rows.add(new Row(Row.HEADER, (c ? "+ " : "- ") + name + " " + count, name, null, false, c ? unread : 0));
     }
 
+    /** Redraws the rows on screen so the highlight follows the trackball. */
+    private void repaintRows() {
+        int first = list.getFirstVisiblePosition();
+        for (int j = 0; j < list.getChildCount(); j++) {
+            int pos = first + j;
+            if (pos < rows.size()) adapter.getView(pos, list.getChildAt(j), list);
+        }
+    }
+
+    private boolean isSelected(int pos) {
+        return !list.isInTouchMode() && list.hasFocus() && pos == list.getSelectedItemPosition();
+    }
+
     private final class Adapter extends BaseAdapter {
         public int getCount() {
             return rows.size();
@@ -388,8 +424,9 @@ public final class BuddyListActivity extends Activity {
             if (r.kind == Row.INVITE || r.unread > 0) color = 0xFFC00000;
             else if (r.kind == Row.ROOM) color = r.dim ? 0xFF808080 : 0xFF5A2DA0;
             else if (r.dim) color = 0xFF808080;
-            t.setTextColor(color);
-            t.setBackgroundColor(r.kind == Row.HEADER ? 0xFFE8E4DC : Color.WHITE);
+            boolean sel = isSelected(i);
+            t.setTextColor(sel ? Color.WHITE : color);
+            t.setBackgroundColor(sel ? Ui.SELECTED : r.kind == Row.HEADER ? 0xFFE8E4DC : Color.WHITE);
             android.graphics.drawable.Drawable icon = r.kind == Row.BUDDY && app.onlineInfo((String) r.data) != null
                     ? app.icons.icon((String) r.data, 26) : null;
             t.setCompoundDrawables(icon, null, null, null);

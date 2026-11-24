@@ -22,6 +22,27 @@ final class Ui {
     static final int MY_NAME = 0xFFC00000;
     static final int THEIR_NAME = 0xFF0000C0;
 
+    /** The trackball highlight on a button: pale blue with a navy frame (pressed: darker). */
+    static android.graphics.drawable.Drawable selectable(Context c) {
+        android.graphics.drawable.StateListDrawable d = new android.graphics.drawable.StateListDrawable();
+        int w = dp(c, 2);
+        android.graphics.drawable.GradientDrawable pressed = new android.graphics.drawable.GradientDrawable();
+        pressed.setColor(0xFF9DB8EC);
+        pressed.setStroke(w, TITLE);
+        pressed.setCornerRadius(dp(c, 3));
+        android.graphics.drawable.GradientDrawable focused = new android.graphics.drawable.GradientDrawable();
+        focused.setColor(0xFFD6E2FA);
+        focused.setStroke(w, TITLE);
+        focused.setCornerRadius(dp(c, 3));
+        d.addState(new int[] {android.R.attr.state_pressed}, pressed);
+        d.addState(new int[] {android.R.attr.state_focused}, focused);
+        d.addState(new int[0], new android.graphics.drawable.ColorDrawable(0));
+        return d;
+    }
+
+    /** Selected row in a list: AIM's navy bar with white text. */
+    static final int SELECTED = TITLE;
+
     static int dp(Context c, int v) {
         return (int) (v * c.getResources().getDisplayMetrics().density + 0.5f);
     }

@@ -132,6 +132,24 @@ abstract class ChatActivity extends Activity {
         setContentView(root);
     }
 
+    /**
+     * Trackball up/down while typing scrolls the conversation (the message box
+     * keeps the keyboard). Left/right still move through your text, and right
+     * at the end of it moves on to Send.
+     */
+    @Override
+    public boolean dispatchKeyEvent(KeyEvent e) {
+        int code = e.getKeyCode();
+        if ((code == KeyEvent.KEYCODE_DPAD_UP || code == KeyEvent.KEYCODE_DPAD_DOWN) && input.hasFocus()
+                && input.getText().toString().indexOf('\n') < 0) {
+            if (e.getAction() == KeyEvent.ACTION_DOWN) {
+                list.smoothScrollBy((code == KeyEvent.KEYCODE_DPAD_UP ? -1 : 1) * Ui.dp(this, 60), 120);
+            }
+            return true;
+        }
+        return super.dispatchKeyEvent(e);
+    }
+
     private void doSend() {
         String t = input.getText().toString();
         if (t.trim().length() == 0) return;
