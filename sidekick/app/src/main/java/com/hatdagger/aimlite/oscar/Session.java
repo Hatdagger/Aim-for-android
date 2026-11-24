@@ -695,6 +695,28 @@ public final class Session {
         }
     }
 
+    /**
+     * Asks the server "who am I?" and waits for the answer: proof the link is
+     * really alive after the phone slept (a dead link can look fine until you
+     * try it). Blocking.
+     */
+    public boolean ping(long ms) {
+        Flap b = bos;
+        if (b == null || b.isClosed() || ended) return false;
+        try {
+            Flap.Waiter w = b.expect(-1, 0x01, 0x0f);
+            b.sendSnac(0x01, 0x0e, new byte[0]);
+            Flap.Snac s = w.await(ms);
+            try {
+                formattedName = UserInfo.read(s.reader()).screenName;
+            } catch (RuntimeException ignored) {
+            }
+            return true;
+        } catch (IOException e) {
+            return false;
+        }
+    }
+
     /** Profile and away message; empty away = back. */
     public void setLocate(String profileText, String awayText) throws IOException {
         requireBos().sendSnac(0x02, 0x04, locateInfo(profileText, awayText));

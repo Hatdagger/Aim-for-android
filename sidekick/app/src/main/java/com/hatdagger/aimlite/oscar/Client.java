@@ -186,6 +186,29 @@ public final class Client {
         t.start();
     }
 
+    /**
+     * The phone woke up (screen on, or the half-hourly check-in): make sure
+     * we're really connected, reconnect if not, and send anything waiting.
+     * Blocking; returns true if the link was alive.
+     */
+    public boolean checkIn(long timeoutMs) {
+        if (!want) return true;
+        Session s = session;
+        if (s == null || state != State.ONLINE || !s.isOnline()) {
+            retryNow();
+            return false;
+        }
+        if (s.ping(timeoutMs)) {
+            schedulePump(0);
+            return true;
+        }
+        // Dead without anyone noticing (the router forgot us, Wi-Fi blipped):
+        // drop it so the normal reconnect starts straight away.
+        s.debugDrop();
+        retryNow();
+        return false;
+    }
+
     /** Skip the remaining wait and reconnect now (network came back, app opened). */
     public void retryNow() {
         synchronized (wake) {

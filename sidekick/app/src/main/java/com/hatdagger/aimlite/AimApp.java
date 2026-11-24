@@ -5,6 +5,8 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.os.Handler;
+import android.os.PowerManager;
+import android.os.SystemClock;
 
 import com.hatdagger.aimlite.oscar.Bytes;
 import com.hatdagger.aimlite.oscar.Client;
@@ -107,6 +109,13 @@ public final class AimApp extends Application {
     private final List<Runnable> observers = new ArrayList<Runnable>();
     private Handler main;
     private Notifier notifier;
+    private PowerManager.WakeLock briefly;
+    private long awakeUntil;
+    private final Runnable sleepNow = new Runnable() {
+        public void run() {
+            letSleep();
+        }
+    };
 
     @Override
     public void onCreate() {
@@ -114,6 +123,32 @@ public final class AimApp extends Application {
         instance = this;
         main = new Handler();
         notifier = new Notifier(this);
+        PowerManager pm = (PowerManager) getSystemService(Context.POWER_SERVICE);
+        if (pm != null) {
+            briefly = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "aim-briefly");
+            briefly.setReferenceCounted(false);
+        }
+    }
+
+    /**
+     * Keeps the Sidekick awake for a moment (a message arriving, a reconnect,
+     * the half-hourly check-in) while the screen is off. Any thread.
+     */
+    public synchronized void stayAwake(long ms) {
+        if (briefly == null) return;
+        long until = SystemClock.elapsedRealtime() + ms;
+        if (until <= awakeUntil && briefly.isHeld()) return;
+        awakeUntil = until;
+        briefly.acquire();
+        main.removeCallbacks(sleepNow);
+        main.postDelayed(sleepNow, ms);
+    }
+
+    /** Done with the moment: the Sidekick may sleep again (if the screen is off). */
+    public synchronized void letSleep() {
+        awakeUntil = 0;
+        main.removeCallbacks(sleepNow);
+        if (briefly != null && briefly.isHeld()) briefly.release();
     }
 
     public SharedPreferences prefs() {
@@ -229,6 +264,9 @@ public final class AimApp extends Application {
 
     private final class Events implements Client.Listener {
         private boolean mine(final Runnable r) {
+            // Long enough for the screen and notification to catch up if the
+            // Sidekick was asleep when this came in.
+            stayAwake(3000);
             final Client me = client;
             post(new Runnable() {
                 public void run() {
@@ -246,6 +284,7 @@ public final class AimApp extends Application {
                 public void run() {
                     state = s;
                     stateMessage = m;
+                    if (s == Client.State.RECONNECTING) stayAwake(60000);
                     if (s == Client.State.ONLINE) everOnline = true;
                 }
             });

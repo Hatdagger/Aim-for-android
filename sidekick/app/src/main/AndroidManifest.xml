@@ -40,6 +40,19 @@
             android:configChanges="keyboard|keyboardHidden|orientation"
             android:windowSoftInputMode="stateHidden|adjustResize" />
 
+        <!-- Home screen mode: off until turned on in Setup (needs a PIN to leave). -->
+        <activity-alias
+            android:name=".HomeScreen"
+            android:enabled="false"
+            android:targetActivity=".BuddyListActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.HOME" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity-alias>
+
         <service android:name=".AimService" />
+        <receiver android:name=".CheckInReceiver" />
     </application>
 </manifest>

@@ -194,9 +194,12 @@ public final class BuddyListActivity extends Activity {
     /** Setup: the things that don't need their own button. */
     private void setupMenu() {
         new AlertDialog.Builder(this).setTitle("Setup")
-                .setItems(new String[] {"Add Buddy", "Sign Off"}, new DialogInterface.OnClickListener() {
+                .setItems(new String[] {"Add Buddy",
+                        HomeMode.isOn(this) ? "Leave Home Screen Mode" : "Make AIM the Home Screen",
+                        "Sign Off"}, new DialogInterface.OnClickListener() {
                     public void onClick(DialogInterface d, int w) {
                         if (w == 0) addDialog("");
+                        else if (w == 1) HomeMode.fromSetup(BuddyListActivity.this);
                         else confirmSignOff();
                     }
                 }).show();
@@ -233,7 +236,8 @@ public final class BuddyListActivity extends Activity {
     @Override
     public boolean onKeyDown(int code, KeyEvent e) {
         if (code == KeyEvent.KEYCODE_BACK) {
-            moveTaskToBack(true);
+            // As the home screen there's nothing behind AIM to go back to.
+            if (!HomeMode.isOn(this)) moveTaskToBack(true);
             return true;
         }
         return super.onKeyDown(code, e);

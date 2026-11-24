@@ -8,6 +8,8 @@ import android.graphics.Typeface;
 import android.os.Bundle;
 import android.view.Gravity;
 import android.view.KeyEvent;
+import android.view.Menu;
+import android.view.MenuItem;
 import android.view.View;
 import android.view.inputmethod.EditorInfo;
 import android.widget.Button;
@@ -177,6 +179,33 @@ public final class SignOnActivity extends Activity {
     private void openBuddyList() {
         startActivity(new Intent(this, BuddyListActivity.class));
         finish();
+    }
+
+    /** As the home screen, Back has nowhere to go; Menu > Leave Home Screen Mode does. */
+    @Override
+    public boolean onKeyDown(int code, KeyEvent e) {
+        if (code == KeyEvent.KEYCODE_BACK && HomeMode.isOn(this)) return true;
+        return super.onKeyDown(code, e);
+    }
+
+    @Override
+    public boolean onCreateOptionsMenu(Menu m) {
+        m.add(0, 1, 0, "Leave Home Screen Mode");
+        return true;
+    }
+
+    @Override
+    public boolean onPrepareOptionsMenu(Menu m) {
+        return HomeMode.isOn(this);
+    }
+
+    @Override
+    public boolean onOptionsItemSelected(MenuItem item) {
+        if (item.getItemId() == 1) {
+            HomeMode.fromSetup(this);
+            return true;
+        }
+        return super.onOptionsItemSelected(item);
     }
 
     @Override
