@@ -55,7 +55,10 @@ class FileXfer {
   String? failReason;
   Rendezvous? proposal;
 
-  ServerSocket? _listener;
+  List<ServerSocket> _listeners = const [];
+
+  /// Addresses we told them (for troubleshooting).
+  String _ours = '';
   PortLease? _lease;
   Timer? _timer;
   Timer? _watchdog;
@@ -230,6 +233,7 @@ class FileTransfers {
       final port = await _listen(x, sender: true);
       final (lan, extra, six, lease) = await path.addresses(port);
       x._lease = lease;
+      x._ours = '${[lan, ...extra, ...six].join(', ')} port $port';
       if (x.state != XferState.offering) {
         _cleanup(x);
         return x;
@@ -280,6 +284,7 @@ class FileTransfers {
       final port = await _listen(x, sender: false);
       final (lan, extra, six, lease) = await path.addresses(port);
       x._lease = lease;
+      x._ours = '${[lan, ...extra, ...six].join(', ')} port $port';
       if (x.state != XferState.connecting) {
         _cleanup(x);
         return;
@@ -296,7 +301,7 @@ class FileTransfers {
       x._timer = Timer(reverseTimeout, () {
         if (x.state == XferState.connecting) {
           _cancelRdv(x, Rendezvous.reasonTimeout);
-          _fail(x, 'buddy never connected back');
+          _fail(x, 'buddy never connected back; we offered ${x._ours}');
         }
       });
     } catch (e) {
@@ -367,7 +372,7 @@ class FileTransfers {
         _emit(n);
       case Rendezvous.cancel:
         if (mine == null || !mine.isPending) return;
-        mine.failReason ??= 'buddy called it off (reason ${r.cancelReason})';
+        mine.failReason ??= 'buddy called it off (reason ${r.cancelReason}); we offered ${mine._ours}';
         _set(
             mine,
             mine.state == XferState.offering && r.cancelReason == Rendezvous.reasonDeclined
@@ -390,14 +395,15 @@ class FileTransfers {
   Future<void> _reverse(FileXfer x, Rendezvous r) async {
     x.state = XferState.connecting;
     _emit(x);
-    final sock = await PeerPath.connectAny(PeerPath.order(r.addresses, r.addresses6), r.port ?? 0);
+    final tried = PeerPath.order(r.addresses, r.addresses6);
+    final sock = await PeerPath.connectAny(tried, r.port ?? 0);
     if (x.state != XferState.connecting) {
       sock?.destroy();
       return;
     }
     if (sock == null) {
       _cancelRdv(x, Rendezvous.reasonUnknown);
-      _fail(x, 'could not reach buddy either way');
+      _fail(x, 'could not reach buddy either way; tried ${tried.join(', ')} port ${r.port}; we offered ${x._ours}');
       return;
     }
     unawaited(_send(x, sock, needHello: false));
@@ -406,9 +412,9 @@ class FileTransfers {
   // ---------------------------------------------------------------- connections
 
   Future<int> _listen(FileXfer x, {required bool sender}) async {
-    final ss = await PeerPath.listen();
-    x._listener = ss;
-    ss.listen((sock) {
+    final all = await PeerPath.listen();
+    x._listeners = all;
+    void onSock(Socket sock) {
       if (!x.isPending || x._sock != null) {
         sock.destroy();
         return;
@@ -420,8 +426,12 @@ class FileTransfers {
       } else {
         unawaited(_receive(x, sock, sayHello: false));
       }
-    }, onError: (_) {});
-    return ss.port;
+    }
+
+    for (final ss in all) {
+      ss.listen(onSock, onError: (_) {});
+    }
+    return all.first.port;
   }
 
   void _startWatchdog(FileXfer x) {
@@ -592,8 +602,10 @@ class FileTransfers {
   void _cleanup(FileXfer x) {
     x._timer?.cancel();
     x._timer = null;
-    x._listener?.close();
-    x._listener = null;
+    for (final l in x._listeners) {
+      l.close();
+    }
+    x._listeners = const [];
     final l = x._lease;
     x._lease = null;
     if (l != null) unawaited(l.close().catchError((_) {}));

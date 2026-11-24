@@ -18,14 +18,16 @@ class PeerPath {
 
   PeerPath({this.useUpnp = true, this.publicIp, this.sessionLocalIp});
 
-  /// Listens on IPv4 and IPv6 at once, on one port. Falls back to IPv4 only
-  /// where the system can't do both.
-  static Future<ServerSocket> listen() async {
+  /// Listens on IPv4, and on IPv6 with the same port where the device has it.
+  /// Two plain sockets rather than one "dual-stack" one, which some phones
+  /// don't handle.
+  static Future<List<ServerSocket>> listen() async {
+    final v4 = await ServerSocket.bind(InternetAddress.anyIPv4, 0);
+    final out = [v4];
     try {
-      return await ServerSocket.bind(InternetAddress.anyIPv6, 0, v6Only: false);
-    } catch (_) {
-      return ServerSocket.bind(InternetAddress.anyIPv4, 0);
-    }
+      out.add(await ServerSocket.bind(InternetAddress.anyIPv6, v4.port, v6Only: true));
+    } catch (_) {}
+    return out;
   }
 
   static bool isPrivate(String ip) {
