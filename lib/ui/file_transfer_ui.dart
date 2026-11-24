@@ -1,10 +1,22 @@
+import 'dart:io';
+
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 
 import '../app/history.dart';
 import '../oscar/file_transfer.dart';
 import '../oscar/oft.dart';
+import 'direct_connect_ui.dart' show ChatPicture;
 import 'retro.dart';
+
+const _pictureExts = {'.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.heic', '.heif'};
+
+/// A received picture saved as a file this app can read (not a content:// one).
+bool isPictureFile(String where) {
+  if (where.startsWith('content://')) return false;
+  final dot = where.lastIndexOf('.');
+  return dot > 0 && _pictureExts.contains(where.substring(dot).toLowerCase());
+}
 
 /// A strip above the messages for one Send File: an offer to answer,
 /// waiting, or the files going across with a progress bar.
@@ -113,7 +125,10 @@ class FileBar extends StatelessWidget {
 class ChatFiles extends StatelessWidget {
   final List<String> entries;
   final Future<bool> Function(String where) onOpen;
-  const ChatFiles({super.key, required this.entries, required this.onOpen});
+
+  /// Pictures show in the chat; tapping one opens it full size.
+  final void Function(String path)? onPicture;
+  const ChatFiles({super.key, required this.entries, required this.onOpen, this.onPicture});
 
   @override
   Widget build(BuildContext context) {
@@ -123,6 +138,10 @@ class ChatFiles extends StatelessWidget {
           padding: const EdgeInsets.only(top: 4),
           child: Builder(builder: (context) {
             final (name, where) = parseFileEntry(e);
+            final show = onPicture;
+            if (show != null && isPictureFile(where) && File(where).existsSync()) {
+              return ChatPicture(image: FileImage(File(where)), onTap: () => show(where));
+            }
             return RetroButton(
               minWidth: 0,
               minHeight: 36,

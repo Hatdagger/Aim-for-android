@@ -536,7 +536,8 @@ class FileTransfers {
           await raf.close();
         }
         if (!x.isActive) return;
-        final saved = await _freeName(dir, name);
+        // Keep the name picked at the start unless something took it meanwhile.
+        final saved = await File(target).exists() ? await _freeName(dir, name) : target;
         await File(part).rename(saved);
         part = null;
         x._partial = null;

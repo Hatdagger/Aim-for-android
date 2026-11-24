@@ -13,7 +13,6 @@ import '../app/settings.dart';
 import '../oscar/aim_html.dart';
 import '../oscar/bytes.dart';
 import '../oscar/client.dart';
-import '../oscar/direct_connect.dart';
 import 'direct_connect_ui.dart';
 import 'file_transfer_ui.dart';
 import 'profile_screen.dart';
@@ -320,7 +319,6 @@ class _ChatPaneState extends State<ChatPane> {
       icon(blocked ? Icons.lock_open : Icons.block, blocked ? 'Unblock' : 'Block',
           signedOn ? () => _block(name, !blocked) : null),
       icon(Icons.person_add_alt_1, 'Add Buddy', signedOn && !buddy ? () => _addBuddy(name) : null),
-      icon(Icons.image, 'Picture (Direct Connect)', signedOn ? _picture : null),
       icon(Icons.attach_file, 'Send File', signedOn ? _sendFiles : null),
       icon(Icons.info_outline, 'Get Info', () => Navigator.of(context)
           .push(MaterialPageRoute(builder: (_) => ProfileScreen(screenName: widget.screenName)))),
@@ -340,8 +338,7 @@ class _ChatPaneState extends State<ChatPane> {
       _barButton(blocked ? Icons.lock_open : Icons.block, blocked ? 'Unblock' : 'Block',
           signedOn ? () => _block(name, !blocked) : null),
       _barButton(Icons.person_add_alt_1, 'Add Buddy', signedOn && !buddy ? () => _addBuddy(name) : null),
-      _barButton(Icons.image, 'Picture', signedOn ? _picture : null),
-      _barButton(Icons.attach_file, 'File', signedOn ? _sendFiles : null),
+      _barButton(Icons.attach_file, 'Send File', signedOn ? _sendFiles : null),
       _barButton(Icons.info_outline, 'Get Info', () => Navigator.of(context)
           .push(MaterialPageRoute(builder: (_) => ProfileScreen(screenName: widget.screenName)))),
       const SizedBox(width: 4),
@@ -479,19 +476,6 @@ class _ChatPaneState extends State<ChatPane> {
 
   // ---------------------------------------------------------------- Direct Connect pictures
 
-  /// The Picture button: send one if Direct Connect is open, otherwise ask
-  /// the buddy to Direct Connect first.
-  Future<void> _picture() async {
-    final app = _app;
-    final link = app.directLink(widget.screenName);
-    if (app.directOpen(widget.screenName)) return _sendPicture();
-    if (link != null && link.state == DirectState.invited) return app.directAccept(widget.screenName);
-    if (link != null && link.isPending) return;
-    final name = app.conversationFor(widget.screenName).displayName;
-    if (!await confirmDirectConnect(context, name)) return;
-    await app.directInvite(widget.screenName);
-  }
-
   Future<void> _sendPicture() async {
     final picked = await pickPicture(context);
     if (picked == null || !mounted) return;
@@ -574,7 +558,12 @@ class _ChatPaneState extends State<ChatPane> {
         const SizedBox(height: 2),
         if (l.text.isNotEmpty) SelectableText(l.text, style: TextStyle(fontSize: 15, color: fg)),
         if (l.images.isNotEmpty) _picturesOf(l, l.mine ? 'me' : l.from),
-        if (l.files.isNotEmpty) ChatFiles(entries: l.files, onOpen: app.openReceivedFile),
+        if (l.files.isNotEmpty)
+          ChatFiles(
+            entries: l.files,
+            onOpen: app.openReceivedFile,
+            onPicture: (p) => PictureViewer.open(context, p, 'Picture from ${l.from}'),
+          ),
         if (pending != null) _pendingRow(app, pending),
       ]),
     );
