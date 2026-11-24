@@ -41,11 +41,26 @@ public final class SignOnActivity extends Activity {
         app = AimApp.get();
         SharedPreferences p = app.prefs();
 
+        buildUi(p);
+
+        // Opened from the launcher while already signed on: go to the list.
+        if (app.signedOn() && app.everOnline) {
+            openBuddyList();
+            return;
+        }
+        if (b == null && !app.signedOn() && app.autoSignOn()) update();
+    }
+
+    /** Lays out the window for the way the phone is held (kept up to date on rotation). */
+    private void buildUi(SharedPreferences p) {
         LinearLayout root = Ui.column(this);
         root.addView(Ui.titleBar(this, "Sign On"), Ui.fill());
 
-        // Landscape: logo on the left, the form on the right.
-        LinearLayout body = Ui.row(this);
+        // Sideways (Sidekick): logo on the left, the form on the right.
+        // Upright (touch phones like the Optimus V): logo on top, form under it.
+        boolean upright = getResources().getConfiguration().orientation
+                != android.content.res.Configuration.ORIENTATION_LANDSCAPE;
+        LinearLayout body = upright ? Ui.column(this) : Ui.row(this);
         body.setGravity(Gravity.TOP);
         int pad = Ui.dp(this, 8);
         body.setPadding(pad, pad, pad, pad);
@@ -63,14 +78,15 @@ public final class SignOnActivity extends Activity {
         TextView sub = Ui.label(this, "for the Sidekick");
         sub.setGravity(Gravity.CENTER);
         logo.addView(sub);
-        body.addView(logo, new LinearLayout.LayoutParams(Ui.dp(this, 130), LinearLayout.LayoutParams.WRAP_CONTENT));
+        body.addView(logo, upright ? Ui.fill()
+                : new LinearLayout.LayoutParams(Ui.dp(this, 130), LinearLayout.LayoutParams.WRAP_CONTENT));
 
         LinearLayout form = Ui.column(this);
         form.addView(Ui.label(this, "Server"));
         server = Ui.field(this, "server address (e.g. 192.168.1.20:5190)", false);
         server.setText(p.getString("server", ""));
         form.addView(server, Ui.fill());
-        LinearLayout names = Ui.row(this);
+        LinearLayout names = upright ? Ui.column(this) : Ui.row(this);
         LinearLayout snCol = Ui.column(this);
         snCol.addView(Ui.label(this, "Screen Name"));
         sn = Ui.field(this, "screen name", false);
@@ -88,8 +104,8 @@ public final class SignOnActivity extends Activity {
             }
         });
         pwCol.addView(pw, Ui.fill());
-        names.addView(snCol, Ui.weight(1));
-        names.addView(pwCol, Ui.weight(1));
+        names.addView(snCol, upright ? Ui.fill() : Ui.weight(1));
+        names.addView(pwCol, upright ? Ui.fill() : Ui.weight(1));
         form.addView(names, Ui.fill());
 
         LinearLayout opts = Ui.row(this);
@@ -116,19 +132,29 @@ public final class SignOnActivity extends Activity {
 
         status = Ui.label(this, "");
         form.addView(status, Ui.fill());
-        body.addView(form, Ui.weight(1));
+        body.addView(form, upright ? Ui.fill() : Ui.weight(1));
 
         ScrollView scroll = new ScrollView(this);
         scroll.addView(body);
         root.addView(scroll, Ui.grow());
         setContentView(root);
+    }
 
-        // Opened from the launcher while already signed on: go to the list.
-        if (app.signedOn() && app.everOnline) {
-            openBuddyList();
-            return;
-        }
-        if (b == null && !app.signedOn() && app.autoSignOn()) update();
+    /** Turning the phone (or sliding the Sidekick's keyboard): re-lay out, keeping what was typed. */
+    @Override
+    public void onConfigurationChanged(android.content.res.Configuration c) {
+        super.onConfigurationChanged(c);
+        String s1 = server.getText().toString(), s2 = sn.getText().toString(), s3 = pw.getText().toString();
+        boolean c1 = savePw.isChecked(), c2 = auto.isChecked();
+        CharSequence st = status.getText();
+        buildUi(app.prefs());
+        server.setText(s1);
+        sn.setText(s2);
+        pw.setText(s3);
+        savePw.setChecked(c1);
+        auto.setChecked(c2);
+        status.setText(st);
+        update();
     }
 
     private void signOn() {
