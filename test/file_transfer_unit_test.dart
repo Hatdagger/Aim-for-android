@@ -59,11 +59,9 @@ class _MemLink implements PeerLink {
 class _FakePuncher implements HolePuncher {
   static final _waiting = <String, Completer<PeerLink?>>{};
   static var _n = 0;
-  static var calls = 0;
 
   @override
   Future<PunchCall> call() async {
-    calls++;
     final id = 'offer-${_n++}';
     final mine = Completer<PeerLink?>();
     _waiting[id] = mine;
