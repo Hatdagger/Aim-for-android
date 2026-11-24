@@ -68,16 +68,25 @@ public final class Notifier {
     /** A new IM or invite while AIM isn't on screen. */
     void message(String from, String text) {
         AimApp app = AimApp.get();
-        if (app.isVisible() && app.openConv != null) {
-            // Someone else is talking while you're in a chat: a short buzz is enough.
-            vibrate();
-            return;
+        if (app.isVisible()) {
+            app.sounds().play(Sounds.Kind.IM_IN);
+            if (app.openConv != null) {
+                // Someone else is talking while you're in a chat: the bell and a short buzz are enough.
+                vibrate();
+                return;
+            }
         }
         int n = app.totalUnread();
         String ticker = from + ": " + text;
         lastTicker = ticker;
         Notification note = build(ctx, ticker, n <= 1 ? from : n + " new messages", text, openApp());
-        note.defaults |= Notification.DEFAULT_SOUND | Notification.DEFAULT_VIBRATE;
+        if (!app.isVisible()) {
+            // AIM's own bell when it's on (the app's sound already played if AIM is on screen).
+            android.net.Uri bell = app.sounds().on() ? app.sounds().imSoundFile() : null;
+            if (bell != null) note.sound = bell;
+            else note.defaults |= Notification.DEFAULT_SOUND;
+            note.defaults |= Notification.DEFAULT_VIBRATE;
+        }
         note.flags |= Notification.FLAG_AUTO_CANCEL | Notification.FLAG_SHOW_LIGHTS;
         note.ledARGB = 0xffffcc00;
         note.ledOnMS = 300;

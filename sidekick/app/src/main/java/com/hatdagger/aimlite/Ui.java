@@ -106,6 +106,53 @@ final class Ui {
         new AlertDialog.Builder(c).setTitle(title).setMessage(text).setPositiveButton("OK", null).show();
     }
 
+    /** Get Info: their icon, status, away message and profile. */
+    static void getInfo(final android.app.Activity a, final String sn) {
+        final android.app.ProgressDialog wait = android.app.ProgressDialog.show(a, sn, "Getting info...", true, true);
+        AimApp.get().getInfo(sn, new AimApp.Done<com.hatdagger.aimlite.oscar.Session.Profile>() {
+            public void ok(com.hatdagger.aimlite.oscar.Session.Profile p) {
+                wait.dismiss();
+                if (a.isFinishing()) return;
+                StringBuilder sb = new StringBuilder();
+                com.hatdagger.aimlite.oscar.Models.UserInfo u = p.user;
+                if (u != null) {
+                    String st = u.isAway() ? "Away" : u.idleMinutes > 0 ? "Idle " + idle(u.idleMinutes) : "Online";
+                    sb.append("Status: ").append(st).append('\n');
+                    if (u.onlineSince > 0) {
+                        long mins = (System.currentTimeMillis() / 1000 - u.onlineSince) / 60;
+                        if (mins >= 0) sb.append("Online for: ").append(idle((int) mins)).append('\n');
+                    }
+                    if (u.warningLevel > 0) sb.append("Warning level: ").append(Math.round(u.warningLevel / 10.0)).append("%\n");
+                }
+                if (p.away != null && p.away.trim().length() > 0) sb.append("\nAway message:\n").append(p.away.trim()).append('\n');
+                sb.append("\nProfile:\n").append(p.profile == null || p.profile.trim().length() == 0
+                        ? "(no profile)" : p.profile.trim());
+                TextView t = label(a, sb.toString());
+                int pad = dp(a, 10);
+                t.setPadding(pad, pad, pad, pad);
+                android.widget.ScrollView sv = new android.widget.ScrollView(a);
+                sv.setBackgroundColor(Color.WHITE);
+                sv.addView(t);
+                AlertDialog.Builder b = new AlertDialog.Builder(a).setTitle(p.screenName).setView(sv)
+                        .setPositiveButton("OK", null);
+                android.graphics.drawable.Drawable icon = AimApp.get().icons.icon(p.screenName, 32);
+                if (icon != null) b.setIcon(icon);
+                b.show();
+            }
+
+            public void failed(String m) {
+                wait.dismiss();
+                if (!a.isFinishing()) message(a, "Get Info", m);
+            }
+        });
+    }
+
+    static String idle(int mins) {
+        if (mins < 60) return mins + " min";
+        if (mins < 60 * 24) return (mins / 60) + " hr " + (mins % 60) + " min";
+        return (mins / (60 * 24)) + " days";
+    }
+
     interface OnText {
         void text(String s);
     }

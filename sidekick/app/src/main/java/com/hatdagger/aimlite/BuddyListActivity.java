@@ -195,11 +195,16 @@ public final class BuddyListActivity extends Activity {
     private void setupMenu() {
         new AlertDialog.Builder(this).setTitle("Setup")
                 .setItems(new String[] {"Add Buddy",
+                        app.sounds().on() ? "Sounds: On (tap to turn off)" : "Sounds: Off (tap to turn on)",
                         HomeMode.isOn(this) ? "Leave Home Screen Mode" : "Make AIM the Home Screen",
                         "Sign Off"}, new DialogInterface.OnClickListener() {
                     public void onClick(DialogInterface d, int w) {
                         if (w == 0) addDialog("");
-                        else if (w == 1) HomeMode.fromSetup(BuddyListActivity.this);
+                        else if (w == 1) {
+                            boolean on = !app.sounds().on();
+                            app.sounds().setOn(on);
+                            if (on) app.sounds().play(Sounds.Kind.IM_IN);
+                        } else if (w == 2) HomeMode.fromSetup(BuddyListActivity.this);
                         else confirmSignOff();
                     }
                 }).show();
@@ -385,6 +390,11 @@ public final class BuddyListActivity extends Activity {
             else if (r.dim) color = 0xFF808080;
             t.setTextColor(color);
             t.setBackgroundColor(r.kind == Row.HEADER ? 0xFFE8E4DC : Color.WHITE);
+            android.graphics.drawable.Drawable icon = r.kind == Row.BUDDY && app.onlineInfo((String) r.data) != null
+                    ? app.icons.icon((String) r.data, 26) : null;
+            t.setCompoundDrawables(icon, null, null, null);
+            t.setCompoundDrawablePadding(Ui.dp(BuddyListActivity.this, 6));
+            if (icon != null) t.setPadding(pad * 2, pad / 2, pad, pad / 2);
             return t;
         }
     }
@@ -418,15 +428,17 @@ public final class BuddyListActivity extends Activity {
             final AimApp.Conv conv = app.convs.get(Bytes.normalizeSn(sn));
             List<String> opts = new ArrayList<String>();
             opts.add("Send Message");
+            opts.add("Get Info");
             opts.add(buddy ? "Remove from Buddy List" : "Add to Buddy List");
             if (conv != null) opts.add("Close conversation");
             new AlertDialog.Builder(this).setTitle(sn)
                     .setItems(opts.toArray(new String[0]), new DialogInterface.OnClickListener() {
                         public void onClick(DialogInterface d, int w) {
                             if (w == 0) openIm(sn);
-                            else if (w == 1 && buddy) removeBuddy(sn);
-                            else if (w == 1) addDialog(sn);
-                            else if (w == 2 && conv != null) app.closeConv(conv.key);
+                            else if (w == 1) Ui.getInfo(BuddyListActivity.this, sn);
+                            else if (w == 2 && buddy) removeBuddy(sn);
+                            else if (w == 2) addDialog(sn);
+                            else if (w == 3 && conv != null) app.closeConv(conv.key);
                         }
                     }).show();
             return true;

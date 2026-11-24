@@ -212,6 +212,37 @@ public final class LiveTest {
         });
         check(c.rooms().isEmpty(), "carol left");
 
+        System.out.println("check-in after sleep");
+        check(a.checkIn(15000), "alice's link answers a ping");
+        check(a.isOnline(), "alice still online after the check-in");
+
+        System.out.println("get info");
+        b.setProfile("bob's profile ☕");
+        b.setAway("back soon");
+        Thread.sleep(800);
+        com.hatdagger.aimlite.oscar.Session.Profile info = a.session().getProfile("bob");
+        check(info.profile != null && info.profile.contains("bob's profile"), "bob's profile: " + info.profile);
+        check(info.away != null && info.away.contains("back soon"), "bob's away message: " + info.away);
+        check(info.user != null && Bytes.normalizeSn(info.user.screenName).equals("bob"), "info is about bob");
+        b.setAway(null);
+        try {
+            a.session().getProfile("nobody" + System.currentTimeMillis());
+            check(false, "info for a missing user should fail");
+        } catch (java.io.IOException e) {
+            check(true, "info for a missing user fails: " + e.getMessage());
+        }
+
+        System.out.println("buddy icon service");
+        byte[] fakeHash = new byte[16];
+        new java.util.Random().nextBytes(fakeHash);
+        try {
+            byte[] got = a.session().fetchBuddyIcon("bob", fakeHash, 1);
+            check(got == null || got.length > 0, "unknown icon -> " + (got == null ? "none" : got.length + " bytes"));
+        } catch (java.io.IOException e) {
+            check(!(e instanceof com.hatdagger.aimlite.oscar.Flap.ConnectionClosed), "icon service said: " + e.getMessage());
+        }
+        check(a.checkIn(15000), "alice's link is fine after asking for an icon");
+
         a.shutdown();
         b.shutdown();
         c.shutdown();

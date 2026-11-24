@@ -109,6 +109,10 @@ public final class AimApp extends Application {
     private final List<Runnable> observers = new ArrayList<Runnable>();
     private Handler main;
     private Notifier notifier;
+    private Sounds sounds;
+    BuddyIcons icons;
+    /** When we last came online; buddy doors stay quiet while the list fills in. */
+    private long onlineAt;
     private PowerManager.WakeLock briefly;
     private long awakeUntil;
     private final Runnable sleepNow = new Runnable() {
@@ -123,6 +127,8 @@ public final class AimApp extends Application {
         instance = this;
         main = new Handler();
         notifier = new Notifier(this);
+        sounds = new Sounds(this);
+        icons = new BuddyIcons(this);
         PowerManager pm = (PowerManager) getSystemService(Context.POWER_SERVICE);
         if (pm != null) {
             briefly = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "aim-briefly");
@@ -157,6 +163,14 @@ public final class AimApp extends Application {
 
     public Notifier notifier() {
         return notifier;
+    }
+
+    Sounds sounds() {
+        return sounds;
+    }
+
+    private boolean listSettled() {
+        return state == Client.State.ONLINE && SystemClock.elapsedRealtime() - onlineAt > 5000;
     }
 
     public void observe(Runnable r) {
@@ -210,6 +224,7 @@ public final class AimApp extends Application {
         convs.clear();
         rooms.clear();
         invites.clear();
+        icons.clear();
         everOnline = false;
         stateMessage = null;
         client = new Client(hp[0], port, sn, pw, new Events());
@@ -285,7 +300,11 @@ public final class AimApp extends Application {
                     state = s;
                     stateMessage = m;
                     if (s == Client.State.RECONNECTING) stayAwake(60000);
-                    if (s == Client.State.ONLINE) everOnline = true;
+                    if (s == Client.State.ONLINE) {
+                        if (!everOnline && isVisible()) sounds.play(Sounds.Kind.DOOR_OPEN);
+                        everOnline = true;
+                        onlineAt = SystemClock.elapsedRealtime();
+                    }
                 }
             });
         }
@@ -296,12 +315,21 @@ public final class AimApp extends Application {
             });
         }
 
-        public void onBuddyArrived(Models.UserInfo info) {
-            onBuddyListChanged();
+        public void onBuddyArrived(final Models.UserInfo info) {
+            mine(new Runnable() {
+                public void run() {
+                    if (info.justArrived && listSettled() && isVisible()) sounds.play(Sounds.Kind.DOOR_OPEN);
+                    icons.wanted(info);
+                }
+            });
         }
 
         public void onBuddyDeparted(String sn) {
-            onBuddyListChanged();
+            mine(new Runnable() {
+                public void run() {
+                    if (listSettled() && isVisible()) sounds.play(Sounds.Kind.DOOR_CLOSE);
+                }
+            });
         }
 
         public void onMessage(final String from, final String text, final boolean auto) {
@@ -315,6 +343,8 @@ public final class AimApp extends Application {
                     if (!viewing) {
                         c.unread++;
                         notifier.message(from, text);
+                    } else {
+                        sounds.play(Sounds.Kind.IM_IN);
                     }
                 }
             });
@@ -424,6 +454,7 @@ public final class AimApp extends Application {
         Line l = new Line(myName(), t, true, false, false);
         l.pending = client.send(to, t);
         c.lines.add(l);
+        sounds.play(Sounds.Kind.IM_OUT);
         changed();
     }
 
@@ -511,6 +542,16 @@ public final class AimApp extends Application {
             public Void run(Client c) throws IOException {
                 c.addBuddy(sn);
                 return null;
+            }
+        }, done);
+    }
+
+    public void getInfo(final String sn, Done<Session.Profile> done) {
+        background(new Work<Session.Profile>() {
+            public Session.Profile run(Client c) throws IOException {
+                Session s = c.session();
+                if (s == null || !s.isOnline()) throw new IOException("Not connected right now.");
+                return s.getProfile(sn);
             }
         }, done);
     }

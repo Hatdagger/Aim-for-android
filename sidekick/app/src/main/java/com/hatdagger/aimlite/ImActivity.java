@@ -41,6 +41,16 @@ public final class ImActivity extends ChatActivity {
     }
 
     @Override
+    protected android.graphics.drawable.Drawable subIcon() {
+        return app.onlineInfo(sn()) == null ? null : app.icons.icon(sn(), 32);
+    }
+
+    @Override
+    protected void onSubTapped() {
+        Ui.getInfo(this, sn());
+    }
+
+    @Override
     protected void send(String text) {
         app.sendIm(sn(), text);
     }
@@ -60,6 +70,7 @@ public final class ImActivity extends ChatActivity {
     public boolean onCreateOptionsMenu(Menu m) {
         m.add(0, 1, 0, "Add Buddy");
         m.add(0, 2, 0, "Close conversation");
+        m.add(0, 3, 0, "Get Info");
         return true;
     }
 
@@ -81,6 +92,10 @@ public final class ImActivity extends ChatActivity {
                     Ui.message(ImActivity.this, "Add Buddy", msg);
                 }
             });
+            return true;
+        }
+        if (item.getItemId() == 3) {
+            Ui.getInfo(this, sn());
             return true;
         }
         if (item.getItemId() == 2) {

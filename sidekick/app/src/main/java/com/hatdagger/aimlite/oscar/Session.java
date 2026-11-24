@@ -62,6 +62,8 @@ public final class Session {
     private volatile Flap bos;
     private Flap nav;
     private final Object navLock = new Object();
+    private Flap bart;
+    private final Object bartLock = new Object();
     private final Set<Rooms.Conn> rooms = new HashSet<Rooms.Conn>();
     private volatile boolean ended;
     private volatile boolean signingOff;
@@ -359,7 +361,7 @@ public final class Session {
             while (r.remaining() > 0) {
                 UserInfo u = UserInfo.read(r);
                 synchronized (this) {
-                    online.put(Bytes.normalizeSn(u.screenName), u);
+                    u.justArrived = online.put(Bytes.normalizeSn(u.screenName), u) == null;
                 }
                 events.onBuddyArrived(u);
             }
@@ -463,6 +465,10 @@ public final class Session {
         synchronized (navLock) {
             if (nav != null) nav.kill();
             nav = null;
+        }
+        synchronized (bartLock) {
+            if (bart != null) bart.kill();
+            bart = null;
         }
     }
 
@@ -769,6 +775,102 @@ public final class Session {
         }
     }
 
+    // ---------------------------------------------------------------- buddy icons and info
+
+    private static final int[][] BART_FAMILIES = {{1, 4}, {0x10, 1}};
+
+    private Flap bartConn() throws IOException {
+        synchronized (bartLock) {
+            if (bart != null && !bart.isClosed()) return bart;
+            Flap f;
+            try {
+                f = openService(0x10, BART_FAMILIES, null);
+            } catch (Flap.ConnectionClosed e) {
+                throw e;
+            } catch (IOException e) {
+                throw new IOException("This server doesn't have buddy icons.");
+            }
+            serviceReady(f, BART_FAMILIES);
+            bart = f;
+            return f;
+        }
+    }
+
+    /** Downloads a buddy's icon (the picture's bytes), or null if the server has none. Blocking. */
+    public byte[] fetchBuddyIcon(String sn, byte[] hash, int flags) throws IOException {
+        Flap c = bartConn();
+        Flap.Waiter w = c.expect(-1, 0x10, 0x05, 0x10, 0x01);
+        Bytes.Writer req = new Bytes.Writer().str8(sn).u8(1).u16(0x0001).u8(flags).u8(hash.length).bytes(hash);
+        c.sendSnac(0x10, 0x04, req.toBytes());
+        Flap.Snac s = w.await(30000);
+        if (s.subtype != 0x05) return null;
+        Bytes.Reader r = s.reader();
+        r.str8();
+        r.u16();
+        r.u8();
+        r.bytes(r.u8());
+        if (r.remaining() < 2) return null;
+        // Some servers put a status byte before the length.
+        int save = r.pos;
+        int len = r.u16();
+        if (len != r.remaining()) {
+            r.pos = save;
+            r.u8();
+            if (r.remaining() < 2) return null;
+            len = r.u16();
+        }
+        if (len == 0 || len > r.remaining()) return null;
+        return r.bytes(len);
+    }
+
+    /** What Get Info shows: their profile, away message and status. */
+    public static final class Profile {
+        public final String screenName;
+        public final String profile;
+        public final String away;
+        public final UserInfo user;
+
+        Profile(String sn, String profile, String away, UserInfo user) {
+            screenName = sn;
+            this.profile = profile;
+            this.away = away;
+            this.user = user;
+        }
+    }
+
+    /** Get Info. Blocking. */
+    public Profile getProfile(String sn) throws IOException {
+        Flap b = requireBos();
+        String profile = null, away = null;
+        UserInfo user = null;
+        String name = sn;
+        for (int flags : new int[] {0x00000001, 0x00000002}) {
+            long id = b.nextReqId();
+            Flap.Waiter w = b.expect(id, 0x02, 0x06, 0x02, 0x01);
+            b.sendSnac(0x02, 0x15, new Bytes.Writer().u32(flags).str8(sn).toBytes(), id);
+            Flap.Snac s = w.await(20000);
+            if (s.subtype == 0x01) {
+                if (flags == 1) throw new IOException(sn + " is not signed on or does not exist.");
+                continue;
+            }
+            Bytes.Reader r = s.reader();
+            user = UserInfo.read(r);
+            name = user.screenName;
+            Bytes.Tlvs t = r.tlvs();
+            if (profile == null) profile = infoText(t, 0x01, 0x02);
+            if (away == null) away = infoText(t, 0x03, 0x04);
+        }
+        return new Profile(name, profile, away, user);
+    }
+
+    private static String infoText(Bytes.Tlvs t, int mimeType, int textType) {
+        Bytes.Tlv v = t.get(textType);
+        if (v == null || v.value.length == 0) return null;
+        Bytes.Tlv mime = t.get(mimeType);
+        boolean unicode = mime != null && mime.str().contains("unicode");
+        return AimText.toText(AimText.decode(unicode ? 0x0002 : 0x0000, v.value));
+    }
+
     /** Finds the room called [name], making it if nobody has. */
     public Rooms.RoomInfo findOrCreateRoom(String name) throws IOException {
         Flap c = navConn();
@@ -843,6 +945,9 @@ public final class Session {
         for (Rooms.Conn c : rs) c.leave();
         synchronized (navLock) {
             if (nav != null) nav.close();
+        }
+        synchronized (bartLock) {
+            if (bart != null) bart.close();
         }
         Flap b = bos;
         if (b != null) b.close();

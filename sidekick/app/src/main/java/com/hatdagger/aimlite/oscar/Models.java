@@ -12,12 +12,22 @@ public final class Models {
         public final int warningLevel;
         public final int userClass;
         public final int idleMinutes;
+        /** Buddy icon id (MD5 of the picture), if they have one. */
+        public final byte[] iconHash;
+        public final int iconFlags;
+        /** Seconds since 1970 when they signed on (0 if not sent). */
+        public final long onlineSince;
+        /** True on the update that says they just signed on (not a status change). */
+        public boolean justArrived;
 
-        UserInfo(String sn, int warn, int cls, int idle) {
+        UserInfo(String sn, int warn, int cls, int idle, byte[] iconHash, int iconFlags, long onlineSince) {
             screenName = sn;
             warningLevel = warn;
             userClass = cls;
             idleMinutes = idle;
+            this.iconHash = iconHash;
+            this.iconFlags = iconFlags;
+            this.onlineSince = onlineSince;
         }
 
         public boolean isAway() {
@@ -34,7 +44,28 @@ public final class Models {
             Bytes.Tlv status = t.get(0x06);
             if (status != null && (status.u32() & 0x0001) != 0) c |= 0x0020;
             Bytes.Tlv idle = t.get(0x04);
-            return new UserInfo(sn, warn, c, idle == null ? 0 : idle.u16());
+            byte[] hash = null;
+            int flags = 0;
+            Bytes.Tlv bart = t.get(0x1d);
+            if (bart != null) {
+                try {
+                    Bytes.Reader br = bart.reader();
+                    while (br.remaining() >= 4) {
+                        int type = br.u16();
+                        int f = br.u8();
+                        int len = br.u8();
+                        byte[] data = br.bytes(len);
+                        if (type == 0x0001 && len > 0) {
+                            hash = data;
+                            flags = f;
+                        }
+                    }
+                } catch (RuntimeException ignored) {
+                }
+            }
+            Bytes.Tlv since = t.get(0x03);
+            return new UserInfo(sn, warn, c, idle == null ? 0 : idle.u16(), hash, flags,
+                    since == null ? 0 : since.u32());
         }
     }
 

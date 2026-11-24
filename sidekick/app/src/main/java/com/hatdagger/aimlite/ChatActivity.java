@@ -60,6 +60,11 @@ abstract class ChatActivity extends Activity {
 
     protected void onSubTapped() {}
 
+    /** A picture at the start of the line under the title (their buddy icon). */
+    protected android.graphics.drawable.Drawable subIcon() {
+        return null;
+    }
+
     @Override
     protected void onCreate(Bundle b) {
         super.onCreate(b);
@@ -161,6 +166,8 @@ abstract class ChatActivity extends Activity {
         title.setText(titleText());
         String s = subText();
         sub.setText(s == null ? "" : s);
+        sub.setCompoundDrawables(subIcon(), null, null, null);
+        sub.setCompoundDrawablePadding(Ui.dp(this, 6));
         sub.setVisibility(s == null ? View.GONE : View.VISIBLE);
         String note = null;
         if (app.state != Client.State.ONLINE) {
