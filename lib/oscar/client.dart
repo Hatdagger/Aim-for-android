@@ -1,12 +1,15 @@
 import 'dart:async';
+import 'dart:io';
 import 'dart:math';
 
 import 'aim_html.dart';
 import 'bytes.dart';
 import 'chat_room.dart';
 import 'direct_connect.dart';
+import 'file_transfer.dart';
 import 'flap.dart' show ConnectionClosed;
 import 'models.dart';
+import 'peer_path.dart';
 import 'session.dart';
 
 enum LinkState {
@@ -58,6 +61,12 @@ class DirectConnectEvent extends ClientEvent {
   DirectConnectEvent(this.event);
 }
 
+/// A file transfer changed (see [AimClient.files]).
+class FileTransferEvent extends ClientEvent {
+  final XferChanged event;
+  FileTransferEvent(this.event);
+}
+
 /// A chat room we're in (or want to be in: it rejoins after a dropped link).
 class ClientRoom {
   RoomInfo info;
@@ -104,6 +113,9 @@ class AimClient {
   /// Direct Connect (pictures straight between devices).
   late final DirectConnect direct;
 
+  /// Send File (files straight between devices).
+  late final FileTransfers files;
+
   /// Delays between reconnect attempts.
   List<Duration> backoff;
 
@@ -115,6 +127,7 @@ class AimClient {
     this.fixLoopbackRedirects = true,
     bool useUpnp = true,
     Future<String?> Function()? publicIp,
+    Future<String> Function()? receiveDir,
     this.backoff = const [
       Duration(seconds: 1),
       Duration(seconds: 3),
@@ -131,6 +144,16 @@ class AimClient {
       useUpnp: useUpnp,
     );
     direct.events.listen((e) => _emit(DirectConnectEvent(e)));
+    files = FileTransfers(
+      sendRdv: (to, cookie, data) async {
+        final s = _session;
+        if (s == null || !s.isOnline) return SendResult.failed;
+        return s.sendRendezvous(to, cookie, data);
+      },
+      receiveDir: receiveDir ?? () async => Directory.systemTemp.path,
+      path: PeerPath(useUpnp: useUpnp, publicIp: publicIp, sessionLocalIp: () => _session?.localIp),
+    );
+    files.events.listen((e) => _emit(FileTransferEvent(e)));
   }
 
   OscarSession? _session;
@@ -252,6 +275,7 @@ class AimClient {
     final w = _wake;
     if (w != null && !w.isCompleted) w.complete();
     await direct.closeAll();
+    await files.closeAll();
     for (final r in rooms.values) {
       r._retry?.cancel();
     }
@@ -289,7 +313,11 @@ class AimClient {
       case MessageReceived(:final message):
         if (isAway && !message.autoResponse) _maybeAutoReply(message.from);
       case RendezvousReceived(:final from, :final rdv):
-        direct.onRendezvous(from, rdv);
+        if (rdv.isSendFile) {
+          files.onRendezvous(from, rdv);
+        } else {
+          direct.onRendezvous(from, rdv);
+        }
       default:
         break;
     }
@@ -577,6 +605,7 @@ class AimClient {
   Future<void> dispose() async {
     await signOff();
     await direct.dispose();
+    await files.dispose();
     await _events.close();
   }
 }

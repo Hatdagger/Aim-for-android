@@ -6,9 +6,17 @@ import 'bytes.dart';
 /// AIM capability for Direct IM ("Direct Connect").
 final capDirectIm = unhex('094613454c7f11d18222444553540000');
 
+/// AIM capability for Send File (OFT file transfer).
+final capSendFile = unhex('094613434c7f11d18222444553540000');
+
 /// Our own extra TLV in a proposal: every IPv4 address (4 bytes each) the
 /// sender thinks it can be reached on. Classic clients ignore unknown TLVs.
 const tagAllAddresses = 0x7a01;
+
+/// Our own extra TLV: public IPv6 addresses (16 bytes each). Many phone and
+/// home connections have these with no router in the way, so they often
+/// connect directly when IPv4 can't.
+const tagAddresses6 = 0x7a02;
 
 /// One ICBM channel-2 "rendezvous" payload (TLV 0x0005): a proposal to
 /// connect directly, an accept, or a cancel. Only this tiny handshake goes
@@ -30,6 +38,7 @@ class Rendezvous {
   Rendezvous(this.type, this.cookie, this.cap, this.tlvs);
 
   bool get isDirectIm => hex(cap) == hex(capDirectIm);
+  bool get isSendFile => hex(cap) == hex(capSendFile);
 
   /// 1 = first proposal, 2 = "you can't reach me, I'll listen instead".
   int get seq => tlvs[0x000a]?.asU16 ?? 1;
@@ -60,6 +69,21 @@ class Rendezvous {
     return [...out.where((a) => !a.startsWith('127.')), ...out.where((a) => a.startsWith('127.'))];
   }
 
+  /// IPv6 addresses the sender listed (see [tagAddresses6]).
+  List<String> get addresses6 {
+    final out = <String>[];
+    final v = tlvs[tagAddresses6]?.value;
+    if (v == null) return out;
+    for (var i = 0; i + 16 <= v.length; i += 16) {
+      try {
+        final a = InternetAddress.fromRawAddress(Uint8List.fromList(v.sublist(i, i + 16)),
+            type: InternetAddressType.IPv6);
+        if (!out.contains(a.address)) out.add(a.address);
+      } catch (_) {}
+    }
+    return out;
+  }
+
   static Rendezvous parse(Uint8List data) {
     final r = ByteReader(data);
     final type = r.u16();
@@ -74,17 +98,23 @@ class Rendezvous {
     return Uint8List.fromList(a.rawAddress);
   }
 
-  static ByteWriter _head(int type, Uint8List cookie) => ByteWriter()
+  static ByteWriter _head(int type, Uint8List cookie, [Uint8List? cap]) => ByteWriter()
     ..u16(type)
     ..bytes(cookie)
-    ..bytes(capDirectIm);
+    ..bytes(cap ?? capDirectIm);
 
   /// A Direct IM proposal like AIM 5 sends: "connect to me at ip:port".
   static Uint8List encodePropose(Uint8List cookie,
-      {required String ip, required int port, int seq = 1, List<String> extra = const []}) {
+      {required String ip,
+      required int port,
+      int seq = 1,
+      List<String> extra = const [],
+      List<String> ipv6 = const [],
+      Uint8List? cap,
+      List<(int, List<int>)> moreTlvs = const []}) {
     final raw = _ip(ip);
     final xor = Uint8List.fromList(raw.map((b) => b ^ 0xff).toList());
-    final w = _head(propose, cookie)
+    final w = _head(propose, cookie, cap)
       ..tlv(0x0002, raw)
       ..tlv(0x0003, raw) // the server replaces this with the address it sees
       ..tlvU16(0x0005, port)
@@ -99,11 +129,20 @@ class Rendezvous {
       if (b.any((x) => x != 0)) all.addAll(b);
     }
     if (all.isNotEmpty) w.tlv(tagAllAddresses, all);
+    final six = <int>[];
+    for (final e in ipv6) {
+      final a = InternetAddress.tryParse(e);
+      if (a != null && a.type == InternetAddressType.IPv6) six.addAll(a.rawAddress);
+    }
+    if (six.isNotEmpty) w.tlv(tagAddresses6, six);
+    for (final (t, v) in moreTlvs) {
+      w.tlv(t, v);
+    }
     return w.toBytes();
   }
 
-  static Uint8List encodeAccept(Uint8List cookie) => _head(accept, cookie).toBytes();
+  static Uint8List encodeAccept(Uint8List cookie, {Uint8List? cap}) => _head(accept, cookie, cap).toBytes();
 
-  static Uint8List encodeCancel(Uint8List cookie, [int reason = reasonDeclined]) =>
-      (_head(cancel, cookie)..tlvU16(0x000b, reason)).toBytes();
+  static Uint8List encodeCancel(Uint8List cookie, [int reason = reasonDeclined, Uint8List? cap]) =>
+      (_head(cancel, cookie, cap)..tlvU16(0x000b, reason)).toBytes();
 }

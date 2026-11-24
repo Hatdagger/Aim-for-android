@@ -122,9 +122,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
               _section('Direct Connect', [
                 RetroCheckbox(
                     value: s.allowDirectConnect,
-                    label: 'Let buddies ask to Direct Connect',
+                    label: 'Let buddies ask to Direct Connect or send files',
                     onChanged: (v) => s.allowDirectConnect = v),
-                const Text('Direct Connect sends pictures straight between your device and your buddy\'s. '
+                const Text('Direct Connect and Send File move pictures and files straight between your device and your buddy\'s. '
                     'They never go through the server. While you\'re connected, your buddy can see your IP address. '
                     'You\'re always asked first.',
                     style: TextStyle(fontSize: 12)),

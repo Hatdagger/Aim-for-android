@@ -65,6 +65,54 @@ class PlatformBridge {
     } catch (_) {}
   }
 
+  // ------------------------------------------------------------ received files
+
+  /// Android 11+: the public Download folder, which apps may write to
+  /// directly. Null where it can't be written (older Android, desktops).
+  static Future<String?> publicDownloads() async {
+    if (!_android) return null;
+    try {
+      return await _ch.invokeMethod<String>('publicDownloads');
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Android 10: copies a received file into Download/AIM through Android's
+  /// media store. Returns its content:// address, or null.
+  static Future<String?> saveToDownloads(String path, String name) async {
+    if (!_android) return null;
+    try {
+      return await _ch.invokeMethod<String>('saveToDownloads', {'path': path, 'name': name});
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Lets Android's Files / Downloads apps see a file saved in a public folder.
+  static Future<void> scanFile(String path) async {
+    if (!_android) return;
+    try {
+      await _ch.invokeMethod('scanFile', {'path': path});
+    } catch (_) {}
+  }
+
+  /// Opens a received file in whatever app handles it. [where] is a file
+  /// path or a content:// address. False if nothing could open it.
+  static Future<bool> openFile(String where) async {
+    try {
+      if (_android) return await _ch.invokeMethod<bool>('openFile', {'where': where}) ?? false;
+      if (Platform.isWindows) {
+        await Process.run('explorer', [where]);
+        return true; // explorer's exit code isn't meaningful
+      }
+      final r = await Process.run(Platform.isMacOS ? 'open' : 'xdg-open', [where]);
+      return r.exitCode == 0;
+    } catch (_) {
+      return false;
+    }
+  }
+
   // ------------------------------------------------------------ in-app updates
 
   /// Android's installer said no (message from Android).

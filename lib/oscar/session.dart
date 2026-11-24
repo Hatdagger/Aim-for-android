@@ -95,6 +95,7 @@ final _caps = [
   unhex('0946134e4c7f11d18222444553540000'), // UTF-8 / unicode messages
   unhex('748f2420628711d18222444553540000'), // chat
   capDirectIm, // Direct Connect (pictures in IMs)
+  capSendFile, // Send File (files straight between devices)
 ];
 
 /// One signed-on OSCAR session (auth + BOS + optional BART connection).
@@ -431,7 +432,7 @@ class OscarSession {
       final data = r.tlvs()[0x0005];
       if (data == null || data.value.length < 26) return;
       final rdv = Rendezvous.parse(data.value);
-      if (rdv.isDirectIm) {
+      if (rdv.isDirectIm || rdv.isSendFile) {
         _emit(RendezvousReceived(info.screenName, rdv));
       } else {
         final inv = RoomInvite.fromRendezvous(info.screenName, rdv);

@@ -20,6 +20,9 @@ An old-school AIM client with modern behaviour, for servers running
   a click-wheel music player whose keyboard slides up over the wheel, and a green-screen
   handheld that boots with a beeeep and pops up a name-entry style letter box (arrows / D-pad
   move the ▶). Key clicks and flip/slide/boot sounds are made in code (Prefs can turn them off).
+- Send File: pick any files with the system file picker; they go straight to your buddy's
+  device (same Wi-Fi first, then IPv6, then the router's public address), never through
+  the server. Received files land in Download/AIM. Transfers keep going in the background.
 - Invite links: "Get a Screen Name" with an invite from a friend.
 - Optional chat history (off by default, cleared when you sign off).
 

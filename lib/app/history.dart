@@ -6,6 +6,15 @@ import 'package:path_provider/path_provider.dart';
 
 import '../oscar/bytes.dart';
 
+/// One received file in a [ChatLine]: its name and where it was saved.
+String fileEntry(String name, String where) => '$name\t$where';
+
+(String, String) parseFileEntry(String e) {
+  final i = e.indexOf('\t');
+  if (i < 0) return (e.split(RegExp(r'[\\/]')).last, e);
+  return (e.substring(0, i), e.substring(i + 1));
+}
+
 class ChatLine {
   final String from;
   final String text;
@@ -23,6 +32,10 @@ class ChatLine {
   /// Pictures in this message (files on this device), sent by Direct Connect.
   final List<String> images;
 
+  /// Files received with Send File: "name<TAB>where" (a path or a content://
+  /// address). See [fileEntry].
+  final List<String> files;
+
   /// A note from the app ("Direct Connect is open"), not a message.
   final bool system;
 
@@ -33,6 +46,7 @@ class ChatLine {
       this.fg,
       this.bg,
       this.images = const [],
+      this.files = const [],
       this.system = false});
 
   Map<String, dynamic> toJson() =>
@@ -45,6 +59,7 @@ class ChatLine {
         if (fg != null) 'fg': fg,
         if (bg != null) 'bg': bg,
         if (images.isNotEmpty) 'img': images,
+        if (files.isNotEmpty) 'fl': files,
         if (system) 'sys': true,
       };
 
@@ -57,6 +72,7 @@ class ChatLine {
         fg: j['fg'] as int?,
         bg: j['bg'] as int?,
         images: [for (final p in (j['img'] as List?) ?? const []) p as String],
+        files: [for (final p in (j['fl'] as List?) ?? const []) p as String],
         system: j['sys'] as bool? ?? false,
       );
 }

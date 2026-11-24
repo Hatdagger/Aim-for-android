@@ -5,18 +5,23 @@ import android.annotation.SuppressLint
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.pm.PackageInstaller
+import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
+import android.media.MediaScannerConnection
 import android.os.Build
+import android.os.Environment
 import android.os.PowerManager
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
 import android.view.HapticFeedbackConstants
 import android.view.InputDevice
+import android.provider.MediaStore
 import android.provider.Settings
+import android.webkit.MimeTypeMap
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.embedding.engine.FlutterEngineCache
@@ -134,6 +139,40 @@ class MainActivity : FlutterActivity() {
                         requestIgnoreBattery()
                         result.success(null)
                     }
+                    "publicDownloads" -> {
+                        // Android 11+ lets apps write their own files straight into Download.
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                            val d = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "AIM")
+                            result.success(d.absolutePath)
+                        } else {
+                            result.success(null)
+                        }
+                    }
+                    "saveToDownloads" -> {
+                        val path = call.argument<String>("path") ?: ""
+                        val name = call.argument<String>("name") ?: File(path).name
+                        Thread {
+                            val uri = try { copyToDownloads(File(path), name) } catch (e: Exception) { null }
+                            runOnUiThread { result.success(uri?.toString()) }
+                        }.start()
+                    }
+                    "scanFile" -> {
+                        val path = call.argument<String>("path") ?: ""
+                        MediaScannerConnection.scanFile(app, arrayOf(path), null, null)
+                        result.success(null)
+                    }
+                    "openFile" -> {
+                        val where = call.argument<String>("where") ?: ""
+                        if (where.startsWith("content://")) {
+                            result.success(viewUri(Uri.parse(where), null))
+                        } else {
+                            val mime = MimeTypeMap.getSingleton()
+                                .getMimeTypeFromExtension(File(where).extension.lowercase())
+                            MediaScannerConnection.scanFile(app, arrayOf(where), null) { _, uri ->
+                                runOnUiThread { result.success(uri != null && viewUri(uri, mime)) }
+                            }
+                        }
+                    }
                     else -> result.notImplemented()
                 }
             } catch (e: Exception) {
@@ -239,6 +278,41 @@ class MainActivity : FlutterActivity() {
         if (status != PackageInstaller.STATUS_SUCCESS) {
             val msg = intent.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE) ?: "status $status"
             channel?.invokeMethod("installFailed", msg)
+        }
+    }
+
+    /** Android 10: puts a received file in Download/AIM via the media store. */
+    private fun copyToDownloads(src: File, name: String): Uri? {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return null
+        val values = ContentValues().apply {
+            put(MediaStore.Downloads.DISPLAY_NAME, name)
+            put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/AIM")
+            put(MediaStore.Downloads.IS_PENDING, 1)
+        }
+        val resolver = applicationContext.contentResolver
+        val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values) ?: return null
+        try {
+            resolver.openOutputStream(uri)?.use { out -> src.inputStream().use { it.copyTo(out, 1 shl 20) } }
+            values.clear()
+            values.put(MediaStore.Downloads.IS_PENDING, 0)
+            resolver.update(uri, values, null, null)
+            return uri
+        } catch (e: Exception) {
+            resolver.delete(uri, null, null)
+            throw e
+        }
+    }
+
+    /** Opens [uri] in another app. False if no app can open it. */
+    private fun viewUri(uri: Uri, mime: String?): Boolean {
+        val i = Intent(Intent.ACTION_VIEW)
+            .setDataAndType(uri, mime ?: contentResolver.getType(uri) ?: "*/*")
+            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+        return try {
+            startActivity(Intent.createChooser(i, null).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            true
+        } catch (e: Exception) {
+            false
         }
     }
 

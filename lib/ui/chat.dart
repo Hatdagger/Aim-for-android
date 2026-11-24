@@ -15,6 +15,7 @@ import '../oscar/bytes.dart';
 import '../oscar/client.dart';
 import '../oscar/direct_connect.dart';
 import 'direct_connect_ui.dart';
+import 'file_transfer_ui.dart';
 import 'profile_screen.dart';
 import 'retro.dart';
 import 'color_picker.dart';
@@ -191,6 +192,15 @@ class _ChatPaneState extends State<ChatPane> {
             onClose: () => app.directClose(widget.screenName),
             onPicture: _sendPicture,
           ),
+          for (final x in app.fileTransfers(widget.screenName))
+            FileBar(
+              key: ValueKey(x.id),
+              xfer: x,
+              name: conv.displayName,
+              onAccept: () => app.acceptFile(x.id),
+              onDecline: () => app.declineFile(x.id),
+              onCancel: () => app.cancelFile(x.id),
+            ),
           const SizedBox(height: 4),
           Expanded(
             child: Sunken(
@@ -311,6 +321,7 @@ class _ChatPaneState extends State<ChatPane> {
           signedOn ? () => _block(name, !blocked) : null),
       icon(Icons.person_add_alt_1, 'Add Buddy', signedOn && !buddy ? () => _addBuddy(name) : null),
       icon(Icons.image, 'Picture (Direct Connect)', signedOn ? _picture : null),
+      icon(Icons.attach_file, 'Send File', signedOn ? _sendFiles : null),
       icon(Icons.info_outline, 'Get Info', () => Navigator.of(context)
           .push(MaterialPageRoute(builder: (_) => ProfileScreen(screenName: widget.screenName)))),
     ]);
@@ -330,6 +341,7 @@ class _ChatPaneState extends State<ChatPane> {
           signedOn ? () => _block(name, !blocked) : null),
       _barButton(Icons.person_add_alt_1, 'Add Buddy', signedOn && !buddy ? () => _addBuddy(name) : null),
       _barButton(Icons.image, 'Picture', signedOn ? _picture : null),
+      _barButton(Icons.attach_file, 'File', signedOn ? _sendFiles : null),
       _barButton(Icons.info_outline, 'Get Info', () => Navigator.of(context)
           .push(MaterialPageRoute(builder: (_) => ProfileScreen(screenName: widget.screenName)))),
       const SizedBox(width: 4),
@@ -497,6 +509,20 @@ class _ChatPaneState extends State<ChatPane> {
     _scrollToEnd();
   }
 
+  // ---------------------------------------------------------------- Send File
+
+  Future<void> _sendFiles() async {
+    final app = _app;
+    final name = app.conversationFor(widget.screenName).displayName;
+    final files = await pickFilesToSend(context, name);
+    if (files == null || !mounted) return;
+    try {
+      await app.sendFiles(widget.screenName, files);
+    } catch (_) {
+      if (mounted) showRetroMessage(context, 'Send File', 'Could not read that file.');
+    }
+  }
+
   Widget _note(ChatLine l) => Center(
         child: Container(
           margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 12),
@@ -548,6 +574,7 @@ class _ChatPaneState extends State<ChatPane> {
         const SizedBox(height: 2),
         if (l.text.isNotEmpty) SelectableText(l.text, style: TextStyle(fontSize: 15, color: fg)),
         if (l.images.isNotEmpty) _picturesOf(l, l.mine ? 'me' : l.from),
+        if (l.files.isNotEmpty) ChatFiles(entries: l.files, onOpen: app.openReceivedFile),
         if (pending != null) _pendingRow(app, pending),
       ]),
     );

@@ -3,14 +3,17 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
+import 'package:path_provider/path_provider.dart';
 
 import '../oscar/aim_html.dart';
 import '../oscar/bytes.dart';
 import '../oscar/chat_room.dart';
 import '../oscar/client.dart';
 import '../oscar/direct_connect.dart';
+import '../oscar/file_transfer.dart';
 import '../oscar/odc.dart';
 import '../oscar/models.dart';
+import '../oscar/oft.dart';
 import '../oscar/session.dart';
 import '../oscar/signup_api.dart';
 import 'invite.dart';
@@ -71,7 +74,10 @@ class AppState extends ChangeNotifier {
 
     syncStyle();
     settings.addListener(syncStyle);
-    settings.addListener(() => client?.direct.allowIncoming = settings.allowDirectConnect);
+    settings.addListener(() {
+      client?.direct.allowIncoming = settings.allowDirectConnect;
+      client?.files.allowIncoming = settings.allowDirectConnect;
+    });
     // Screens watch AppState; redraw them whenever a setting changes so what
     // they show always matches the settings in use.
     settings.addListener(notifyListeners);
@@ -173,8 +179,10 @@ class AppState extends ChangeNotifier {
       profileHtml: textToAimHtml(settings.profileFor(screenName)),
       fixLoopbackRedirects: settings.fixLoopbackRedirects,
       publicIp: () => _api(server).myIp(),
+      receiveDir: _receiveDir,
     );
     c.direct.allowIncoming = settings.allowDirectConnect;
+    c.files.allowIncoming = settings.allowDirectConnect;
     client = c;
     _iconUploaded = false;
     conversations.clear();
@@ -259,6 +267,8 @@ class AppState extends ChangeNotifier {
         _onSession(event);
       case DirectConnectEvent(:final event):
         _onDirect(event);
+      case FileTransferEvent(:final event):
+        _onFile(event);
       case RoomUpdate():
         _onRoom(e);
     }
@@ -613,6 +623,155 @@ class AppState extends ChangeNotifier {
       _note(to, 'Picture not sent: Direct Connect closed.');
     }
     notifyListeners();
+  }
+
+  // --------------------------------------------------------------- send file
+
+  /// Transfers with [sn] still going, offers included.
+  List<FileXfer> fileTransfers(String sn) => client?.files.activeWith(sn) ?? const [];
+
+  /// Offers files (path, name) to [sn]. They go straight between devices.
+  Future<void> sendFiles(String sn, List<(String, String)> files) async {
+    final c = client;
+    if (c == null || files.isEmpty) return;
+    conversationFor(sn);
+    final f = c.files.offer(sn, files);
+    notifyListeners();
+    await f;
+  }
+
+  Future<void> acceptFile(String id) async {
+    final f = client?.files.accept(id);
+    notifyListeners();
+    await f;
+  }
+
+  void declineFile(String id) {
+    client?.files.decline(id);
+    notifyListeners();
+  }
+
+  void cancelFile(String id) {
+    client?.files.cancel(id);
+    notifyListeners();
+  }
+
+  Future<bool> openReceivedFile(String where) => PlatformBridge.openFile(where);
+
+  String? _recvDir;
+
+  /// Android 10 and older: files are received into the app's own folder and
+  /// then handed to Android's Downloads (Android 10) or left there.
+  bool _recvNeedsCopy = false;
+
+  /// Where received files go: Download/AIM on Android 11+ and on computers.
+  Future<String> _receiveDir() async {
+    final cached = _recvDir;
+    if (cached != null && await Directory(cached).exists()) return cached;
+    final sep = Platform.pathSeparator;
+    String dir;
+    if (Platform.isAndroid) {
+      final pub = await PlatformBridge.publicDownloads();
+      if (pub != null && await _writable(pub)) {
+        dir = pub;
+        _recvNeedsCopy = false;
+      } else {
+        final ext = await getExternalStorageDirectories(type: StorageDirectory.downloads);
+        final base = (ext != null && ext.isNotEmpty) ? ext.first : await getApplicationDocumentsDirectory();
+        dir = '${base.path}${sep}AIM';
+        _recvNeedsCopy = true;
+      }
+    } else {
+      Directory? d;
+      try {
+        d = await getDownloadsDirectory();
+      } catch (_) {}
+      d ??= await getApplicationDocumentsDirectory();
+      dir = '${d.path}${sep}AIM';
+    }
+    await Directory(dir).create(recursive: true);
+    _recvDir = dir;
+    return dir;
+  }
+
+  static Future<bool> _writable(String dir) async {
+    try {
+      await Directory(dir).create(recursive: true);
+      final t = File('$dir${Platform.pathSeparator}.aim-write-test');
+      await t.writeAsString('ok', flush: true);
+      await t.delete();
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  void _onFile(XferChanged e) {
+    final x = e.xfer;
+    final conv = conversationFor(x.peer);
+    final who = conv.displayName;
+    switch (e.state) {
+      case XferState.offered:
+        _alert(conv);
+      case XferState.done:
+        if (x.outgoing) {
+          _note(x.peer, 'Sent ${x.label} (${formatBytes(x.totalSize)}) to $who.');
+          sounds.play(SoundEvent.imSent);
+          _dropPickerCopies(x);
+        } else {
+          unawaited(_received(x));
+        }
+      case XferState.failed:
+        _note(x.peer, 'File transfer failed.');
+        if (x.outgoing) _dropPickerCopies(x);
+      case XferState.declined:
+        _note(x.peer, x.outgoing ? '$who declined the file.' : 'You declined the file.');
+        if (x.outgoing) _dropPickerCopies(x);
+      case XferState.cancelled:
+        _note(x.peer, 'File transfer cancelled.');
+        if (x.outgoing) _dropPickerCopies(x);
+      case XferState.offering:
+      case XferState.connecting:
+      case XferState.moving:
+        break;
+    }
+  }
+
+  Future<void> _received(FileXfer x) async {
+    final entries = <String>[];
+    for (final f in x.files) {
+      var where = f.path;
+      if (where == null) continue;
+      if (Platform.isAndroid) {
+        if (_recvNeedsCopy) {
+          final uri = await PlatformBridge.saveToDownloads(where, f.name);
+          if (uri != null) {
+            try {
+              await File(where).delete();
+            } catch (_) {}
+            where = uri;
+          }
+        } else {
+          await PlatformBridge.scanFile(where);
+        }
+      }
+      entries.add(fileEntry(f.name, where));
+    }
+    if (entries.isEmpty) return;
+    _addIncoming(x.peer, ChatLine(x.peer, '', DateTime.now(), mine: false, files: entries));
+    notifyListeners();
+  }
+
+  /// Android's file picker hands over a copy of each file in the app's
+  /// cache; once sent, those copies aren't needed.
+  void _dropPickerCopies(FileXfer x) {
+    if (!Platform.isAndroid) return;
+    for (final f in x.files) {
+      final p = f.path;
+      if (p != null && p.contains('${Platform.pathSeparator}file_picker${Platform.pathSeparator}')) {
+        File(p).delete().catchError((_) => File(p)).ignore();
+      }
+    }
   }
 
   OutgoingMessage? pending(String id) => client?.outbox.where((m) => m.id == id).firstOrNull;
