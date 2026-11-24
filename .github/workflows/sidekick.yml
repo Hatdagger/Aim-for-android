@@ -1,0 +1,128 @@
+name: Sidekick (Android 2.2) build and test
+
+on:
+  push:
+    branches: ['**']
+    paths: ['sidekick/**', '.github/workflows/sidekick.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  # The AIM code (sign-on, IMs, rooms, reconnect) against a real Open OSCAR Server.
+  live-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Get Open OSCAR Server
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -e
+          mkdir -p "$RUNNER_TEMP/oos" && cd "$RUNNER_TEMP/oos"
+          gh release download -R mk6i/open-oscar-server --pattern '*linux*x86_64*' || \
+            gh release download -R mk6i/open-oscar-server --pattern '*linux*amd64*'
+          for f in *; do
+            case "$f" in
+              *.tar.gz|*.tgz) tar xzf "$f" ;;
+              *.zip) unzip -q "$f" ;;
+            esac
+          done
+          BIN=$(find . -type f -name 'open_oscar_server*' ! -name '*.tar.gz' ! -name '*.zip' | head -1)
+          chmod +x "$BIN"
+          echo "OOS_BIN=$RUNNER_TEMP/oos/$BIN" >> "$GITHUB_ENV"
+          echo "OOS_DIR=$RUNNER_TEMP/oos/$(dirname "$BIN")" >> "$GITHUB_ENV"
+      - name: Start Open OSCAR Server
+        run: |
+          cd "$OOS_DIR"
+          DISABLE_AUTH=false nohup "$OOS_BIN" > "$RUNNER_TEMP/oos.log" 2>&1 &
+          for i in $(seq 1 60); do
+            if nc -z 127.0.0.1 5190 && nc -z 127.0.0.1 8080; then break; fi
+            sleep 1
+          done
+          for u in alice bob carol; do
+            curl -fsS -d "{\"screen_name\":\"$u\",\"password\":\"password1\"}" http://127.0.0.1:8080/user || true
+            echo
+          done
+      - name: Live test
+        run: |
+          mkdir -p build/lt
+          javac -source 8 -target 8 -Xlint:-options -d build/lt \
+            sidekick/app/src/main/java/com/hatdagger/aimlite/oscar/*.java sidekick/livetest/LiveTest.java
+          timeout 300 java -cp build/lt LiveTest 127.0.0.1:5190
+      - name: Server log
+        if: always()
+        run: tail -80 "$RUNNER_TEMP/oos.log" || true
+
+  # The APK. Lint fails the build if anything newer than Android 2.2 sneaks in.
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.14.3'
+      - name: Signing key (from repository secrets, if set)
+        env:
+          ANDROID_KEYSTORE: ${{ secrets.ANDROID_KEYSTORE }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          if [ -n "$ANDROID_KEYSTORE" ]; then
+            printf '%s' "$ANDROID_KEYSTORE" | tr -d ' \r\n' | base64 -d > "$RUNNER_TEMP/aim-release.jks"
+            # Android 2.2 only understands RSA keys; use the shared key if it is one.
+            if keytool -list -v -keystore "$RUNNER_TEMP/aim-release.jks" -storepass "$ANDROID_KEY_PASSWORD" -alias aim 2>/dev/null \
+                | grep -qi 'Subject Public Key Algorithm: .*RSA'; then
+              echo "AIM_KEYSTORE=$RUNNER_TEMP/aim-release.jks" >> "$GITHUB_ENV"
+              echo "Signing with the shared RSA key"
+            else
+              echo "Shared key isn't RSA; using the debug key"
+            fi
+          fi
+      - name: Build (lint + release APK)
+        env:
+          AIM_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          AIM_BUILD: ${{ github.run_number }}
+        working-directory: sidekick
+        run: gradle --no-daemon lintRelease assembleRelease
+      - name: Lint report
+        if: failure()
+        run: |
+          find sidekick -name 'lint-results*.txt' -exec cat {} \; || true
+      - name: Check the APK
+        run: |
+          APK=$(find sidekick/app/build/outputs/apk/release -name '*.apk' | head -1)
+          cp "$APK" aim-sidekick.apk
+          BT=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
+          "$BT/aapt" dump badging aim-sidekick.apk | grep -E "package|sdkVersion|launchable" || true
+          "$BT/apksigner" verify --min-sdk-version 8 --print-certs aim-sidekick.apk | head -5
+      - uses: actions/upload-artifact@v4
+        with:
+          name: aim-sidekick
+          path: aim-sidekick.apk
+      - name: Publish "sidekick-latest" (download link for the SD card)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          cat > notes.md <<NOTES
+          AIM Lite for the T-Mobile Sidekick 4G (Android 2.2), built from the ${GITHUB_REF_NAME} branch (build ${GITHUB_RUN_NUMBER}).
+
+          Install: copy aim-sidekick.apk to the SD card, then on the Sidekick turn on
+          Settings > Applications > Unknown sources and open the file with a file manager.
+          NOTES
+          gh release delete sidekick-latest -R "$REPO" --cleanup-tag -y || true
+          for attempt in 1 2 3 4; do
+            gh release create sidekick-latest aim-sidekick.apk -R "$REPO" --target "$GITHUB_SHA" \
+              --prerelease --title "AIM Lite for Sidekick (latest)" --notes-file notes.md && exit 0
+            echo "retrying in 15s"; sleep 15
+          done
+          exit 1

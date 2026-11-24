@@ -3,9 +3,9 @@ name: Build and test
 on:
   push:
     branches: ['**']
-    paths-ignore: ['server/**', '.github/workflows/server.yml']
+    paths-ignore: ['server/**', '.github/workflows/server.yml', 'sidekick/**', '.github/workflows/sidekick.yml']
   pull_request:
-    paths-ignore: ['server/**', '.github/workflows/server.yml']
+    paths-ignore: ['server/**', '.github/workflows/server.yml', 'sidekick/**', '.github/workflows/sidekick.yml']
   workflow_dispatch:
 
 permissions:
