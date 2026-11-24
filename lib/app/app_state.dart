@@ -180,6 +180,7 @@ class AppState extends ChangeNotifier {
       fixLoopbackRedirects: settings.fixLoopbackRedirects,
       publicIp: () => _api(server).myIp(),
       receiveDir: _receiveDir,
+      deviceAddresses: PlatformBridge.localAddresses,
     );
     c.direct.allowIncoming = settings.allowDirectConnect;
     c.files.allowIncoming = settings.allowDirectConnect;

@@ -9,6 +9,9 @@ import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
 import android.net.Uri
 import android.media.MediaScannerConnection
 import android.os.Build
@@ -138,6 +141,9 @@ class MainActivity : FlutterActivity() {
                     "requestIgnoreBatteryOptimizations" -> {
                         requestIgnoreBattery()
                         result.success(null)
+                    }
+                    "localAddresses" -> {
+                        result.success(localAddresses())
                     }
                     "publicDownloads" -> {
                         // Android 11+ lets apps write their own files straight into Download.
@@ -279,6 +285,40 @@ class MainActivity : FlutterActivity() {
             val msg = intent.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE) ?: "status $status"
             channel?.invokeMethod("installFailed", msg)
         }
+    }
+
+    /**
+     * This device's own addresses (Wi-Fi first), straight from Android. Dart's
+     * own interface listing doesn't work on newer Android versions.
+     */
+    private fun localAddresses(): List<String> {
+        val cm = applicationContext.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        val out = mutableListOf<String>()
+        val nets = mutableListOf<Network>()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) cm.activeNetwork?.let { nets.add(it) }
+        @Suppress("DEPRECATION")
+        for (n in cm.allNetworks) if (!nets.contains(n)) nets.add(n)
+        // Wi-Fi and Ethernet before mobile data.
+        val ordered = nets.sortedBy { n ->
+            val caps = cm.getNetworkCapabilities(n)
+            when {
+                caps == null -> 3
+                caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) -> 0
+                caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) -> 1
+                caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN) -> 4
+                else -> 2
+            }
+        }
+        for (n in ordered) {
+            val lp = cm.getLinkProperties(n) ?: continue
+            for (la in lp.linkAddresses) {
+                val a = la.address
+                if (a.isLoopbackAddress || a.isLinkLocalAddress || a.isAnyLocalAddress) continue
+                val text = (a.hostAddress ?: continue).substringBefore('%')
+                if (!out.contains(text)) out.add(text)
+            }
+        }
+        return out
     }
 
     /** Android 10: puts a received file in Download/AIM via the media store. */

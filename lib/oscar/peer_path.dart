@@ -16,7 +16,11 @@ class PeerPath {
   final Future<String?> Function()? publicIp;
   final String? Function()? sessionLocalIp;
 
-  PeerPath({this.useUpnp = true, this.publicIp, this.sessionLocalIp});
+  /// The device's own addresses as the system reports them (Android, where
+  /// Dart's interface listing doesn't work). Optional.
+  final Future<List<String>> Function()? deviceAddresses;
+
+  PeerPath({this.useUpnp = true, this.publicIp, this.sessionLocalIp, this.deviceAddresses});
 
   /// Listens on IPv4, and on IPv6 with the same port where the device has it.
   /// Two plain sockets rather than one "dual-stack" one, which some phones
@@ -43,6 +47,35 @@ class PeerPath {
     final first = a.rawAddress[0];
     // 2000::/3 is the public range; fc00::/7 is private.
     return (first & 0xe0) == 0x20;
+  }
+
+  /// Addresses from [deviceAddresses] plus Dart's own listing: (IPv4 home
+  /// network addresses, public IPv6 addresses).
+  Future<(List<String>, List<String>)> _deviceAddrs() async {
+    final v4 = <String>[], v6 = <String>[];
+    final fromSystem = <String>[];
+    try {
+      fromSystem.addAll(await (deviceAddresses?.call() ?? Future.value(const <String>[])));
+    } catch (_) {}
+    try {
+      final ifs = await NetworkInterface.list(includeLinkLocal: false);
+      for (final i in ifs) {
+        fromSystem.addAll(i.addresses.map((a) => a.address));
+      }
+    } catch (_) {}
+    for (final s in fromSystem) {
+      final a = InternetAddress.tryParse(s);
+      if (a == null || a.isLoopback) continue;
+      if (a.type == InternetAddressType.IPv4) {
+        if (isPrivate(s) && !v4.contains(s)) v4.add(s);
+      } else if (isGlobal6(a) && !v6.contains(a.address)) {
+        v6.add(a.address);
+      }
+    }
+    int rank(String ip) => ip.startsWith('192.168.') ? 0 : (ip.startsWith('10.') ? 1 : (ip.startsWith('172.') ? 2 : 3));
+    // Keep the system's order (Wi-Fi first) within each rank.
+    final ordered = [for (var r = 0; r < 4; r++) ...v4.where((ip) => rank(ip) == r)];
+    return (ordered, v6.take(4).toList());
   }
 
   Future<String> lanIp() async {
@@ -83,8 +116,9 @@ class PeerPath {
   /// Our addresses: (home-network IPv4, extra public IPv4s, IPv6s, UPnP lease).
   /// Close the lease with [PortLease.close] once connected or given up.
   Future<(String, List<String>, List<String>, PortLease?)> addresses(int port) async {
-    final lan = await lanIp();
-    final extra = <String>[];
+    final (homeV4, sys6) = await _deviceAddrs();
+    final lan = homeV4.isNotEmpty ? homeV4.first : await lanIp();
+    final extra = <String>[...homeV4.skip(1)];
     PortLease? lease;
 
     Future<void> upnp() async {
@@ -110,9 +144,8 @@ class PeerPath {
       if (p != null) extra.add(p);
     }
 
-    final six = ipv6();
     await Future.wait([upnp(), pub()]).timeout(const Duration(seconds: 7), onTimeout: () => const []);
-    return (lan, extra.toSet().where((e) => e != lan).toList(), await six, lease);
+    return (lan, extra.toSet().where((e) => e != lan).toList(), sys6, lease);
   }
 
   /// Tries each address (IPv4 or IPv6) a little apart and keeps the first that

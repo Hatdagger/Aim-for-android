@@ -67,6 +67,18 @@ class PlatformBridge {
 
   // ------------------------------------------------------------ received files
 
+  /// This device's own network addresses, Wi-Fi first (Android only; empty
+  /// elsewhere, where Dart can list them itself).
+  static Future<List<String>> localAddresses() async {
+    if (!_android) return const [];
+    try {
+      final l = await _ch.invokeMethod<List<dynamic>>('localAddresses');
+      return [for (final a in l ?? const []) a as String];
+    } catch (_) {
+      return const [];
+    }
+  }
+
   /// Android 11+: the public Download folder, which apps may write to
   /// directly. Null where it can't be written (older Android, desktops).
   static Future<String?> publicDownloads() async {

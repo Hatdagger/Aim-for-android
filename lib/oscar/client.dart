@@ -128,6 +128,7 @@ class AimClient {
     bool useUpnp = true,
     Future<String?> Function()? publicIp,
     Future<String> Function()? receiveDir,
+    Future<List<String>> Function()? deviceAddresses,
     this.backoff = const [
       Duration(seconds: 1),
       Duration(seconds: 3),
@@ -151,7 +152,11 @@ class AimClient {
         return s.sendRendezvous(to, cookie, data);
       },
       receiveDir: receiveDir ?? () async => Directory.systemTemp.path,
-      path: PeerPath(useUpnp: useUpnp, publicIp: publicIp, sessionLocalIp: () => _session?.localIp),
+      path: PeerPath(
+          useUpnp: useUpnp,
+          publicIp: publicIp,
+          sessionLocalIp: () => _session?.localIp,
+          deviceAddresses: deviceAddresses),
     );
     files.events.listen((e) => _emit(FileTransferEvent(e)));
   }
