@@ -7,6 +7,7 @@ import 'package:aim_for_android/oscar/bytes.dart';
 import 'package:aim_for_android/oscar/chat_room.dart';
 import 'package:aim_for_android/oscar/client.dart';
 import 'package:aim_for_android/oscar/direct_connect.dart';
+import 'package:aim_for_android/oscar/file_transfer.dart';
 import 'package:aim_for_android/oscar/odc.dart';
 import 'package:aim_for_android/oscar/session.dart';
 import 'package:crypto/crypto.dart';
@@ -36,6 +37,17 @@ Future<DirectMessage> _dcMessage(AimClient c) async {
       .firstWhere((e) => e is DirectConnectEvent && e.event is DirectMessageIn)
       .timeout(const Duration(seconds: 30));
   return ((e as DirectConnectEvent).event as DirectMessageIn).message;
+}
+
+Future<FileXfer> _xfer(AimClient c, bool Function(FileXfer) ok, {Duration wait = const Duration(seconds: 40)}) async {
+  for (final x in c.files.xfers.values) {
+    if (ok(x)) return x;
+  }
+  final e = await c.events
+      .firstWhere((e) => e is FileTransferEvent && ok(e.event.xfer))
+      .timeout(wait, onTimeout: () => throw TestFailure('${c.screenName}: transfer not as expected '
+          '(${c.files.xfers.values.map((x) => '${x.peer}=${x.state} ${x.failReason ?? ''}').join(', ')})'));
+  return (e as FileTransferEvent).event.xfer;
 }
 
 Future<void> _online(AimClient c, {Duration wait = const Duration(seconds: 30)}) async {
@@ -430,5 +442,44 @@ void main() {
 
     await a.dispose();
     await b.dispose();
+  }, skip: skip, timeout: t);
+
+  test('Send File through the real server: offer, accept, files arrive', () async {
+    final dir = await Directory.systemTemp.createTemp('aim_sf');
+    final a = _client('alice');
+    final b = AimClient(
+      server: ServerConfig.parse(_server!),
+      screenName: 'bob',
+      password: _pw,
+      useUpnp: false,
+      receiveDir: () async => '${dir.path}/bob',
+      backoff: const [Duration(milliseconds: 300), Duration(seconds: 1)],
+    );
+    a.start();
+    b.start();
+    await _online(a);
+    await _online(b);
+
+    final data = Uint8List.fromList(List.generate(3 * 1024 * 1024 + 5, (i) => (i * 13) & 0xff));
+    final src = File('${dir.path}/clip.bin');
+    await src.writeAsBytes(data);
+
+    final offered = _xfer(b, (x) => x.state == XferState.offered);
+    final out = await a.files.offer('bob', [(src.path, 'clip.bin')]);
+    expect(out.failReason, isNull);
+    final inc = await offered;
+    expect(inc.firstName, 'clip.bin');
+    final aDone = _xfer(a, (x) => x.id == out.id && !x.isActive);
+    final bDone = _xfer(b, (x) => x.id == inc.id && !x.isActive);
+    await b.files.accept(inc.id);
+    final ra = await aDone;
+    final rb = await bDone;
+    expect(ra.state, XferState.done, reason: 'alice: ${ra.failReason}');
+    expect(rb.state, XferState.done, reason: 'bob: ${rb.failReason}');
+    expect(await File(inc.files.single.path!).readAsBytes(), data);
+
+    await a.dispose();
+    await b.dispose();
+    await dir.delete(recursive: true);
   }, skip: skip, timeout: t);
 }

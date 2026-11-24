@@ -50,6 +50,9 @@ class FileXfer {
 
   DateTime since = DateTime.now();
   DateTime? startedAt;
+
+  /// Why it failed (for troubleshooting; the chat just says it failed).
+  String? failReason;
   Rendezvous? proposal;
 
   ServerSocket? _listener;
@@ -171,6 +174,11 @@ class FileTransfers {
     _emit(x);
   }
 
+  void _fail(FileXfer x, String why) {
+    x.failReason ??= why;
+    _set(x, XferState.failed);
+  }
+
   void _moved(FileXfer x, int n) {
     x.moved += n;
     final now = DateTime.now();
@@ -215,7 +223,7 @@ class FileTransfers {
     xfers[x.id] = x;
     _emit(x);
     if (list.isEmpty) {
-      _set(x, XferState.failed);
+      _fail(x, 'no files');
       return x;
     }
     try {
@@ -236,17 +244,17 @@ class FileTransfers {
               cap: capSendFile,
               moreTlvs: OftOffer(x.count, total, x.firstName).toTlvs()));
       if (!ok) {
-        _set(x, XferState.failed);
+        _fail(x, 'invite not delivered');
         return x;
       }
       x._timer = Timer(inviteTimeout, () {
         if (x.state == XferState.offering) {
           _cancelRdv(x, Rendezvous.reasonTimeout);
-          _set(x, XferState.failed);
+          _fail(x, 'no answer in time');
         }
       });
-    } catch (_) {
-      _set(x, XferState.failed);
+    } catch (e) {
+      _fail(x, 'offer setup error: $e');
     }
     return x;
   }
@@ -281,18 +289,18 @@ class FileTransfers {
           Rendezvous.encodePropose(x.cookie,
               ip: lan, port: port, seq: 2, extra: extra, ipv6: six, cap: capSendFile));
       if (!ok) {
-        _set(x, XferState.failed);
+        _fail(x, 'reverse invite not delivered');
         return;
       }
       x._timer?.cancel();
       x._timer = Timer(reverseTimeout, () {
         if (x.state == XferState.connecting) {
           _cancelRdv(x, Rendezvous.reasonTimeout);
-          _set(x, XferState.failed);
+          _fail(x, 'buddy never connected back');
         }
       });
-    } catch (_) {
-      _set(x, XferState.failed);
+    } catch (e) {
+      _fail(x, 'accept setup error: $e');
     }
   }
 
@@ -359,6 +367,7 @@ class FileTransfers {
         _emit(n);
       case Rendezvous.cancel:
         if (mine == null || !mine.isPending) return;
+        mine.failReason ??= 'buddy called it off (reason ${r.cancelReason})';
         _set(
             mine,
             mine.state == XferState.offering && r.cancelReason == Rendezvous.reasonDeclined
@@ -368,7 +377,7 @@ class FileTransfers {
         if (mine != null && mine.state == XferState.offering) {
           mine._timer?.cancel();
           mine._timer = Timer(reverseTimeout, () {
-            if (mine.isPending) _set(mine, XferState.failed);
+            if (mine.isPending) _fail(mine, 'buddy accepted but never connected');
           });
           mine.state = XferState.connecting;
           _emit(mine);
@@ -388,7 +397,7 @@ class FileTransfers {
     }
     if (sock == null) {
       _cancelRdv(x, Rendezvous.reasonUnknown);
-      _set(x, XferState.failed);
+      _fail(x, 'could not reach buddy either way');
       return;
     }
     unawaited(_send(x, sock, needHello: false));
@@ -419,7 +428,7 @@ class FileTransfers {
     x._watchdog?.cancel();
     x._watchdog = Timer.periodic(const Duration(seconds: 5), (_) {
       if (x.state == XferState.moving && DateTime.now().difference(x._lastMoved) > stallTimeout) {
-        _set(x, XferState.failed);
+        _fail(x, 'stalled');
       }
     });
   }
@@ -474,10 +483,10 @@ class FileTransfers {
         if (d.type != OftHeader.done || !_same(d.cookie, x.cookie)) throw const FormatException('expected done');
       }
       _set(x, XferState.done);
-    } catch (_) {
+    } catch (e) {
       // A stray connection to our port doesn't spoil the transfer; only the
       // real one (or the one we made ourselves) does.
-      if ((claimed || !needHello) && x.isActive && !x._stopping) _set(x, XferState.failed);
+      if ((claimed || !needHello) && x.isActive && !x._stopping) _fail(x, 'sending: $e');
       sock.destroy();
     } finally {
       rd.cancel();
@@ -548,8 +557,8 @@ class FileTransfers {
         if (p.filesLeft <= 1) break;
       }
       _set(x, XferState.done);
-    } catch (_) {
-      if ((claimed || sayHello) && x.isActive && !x._stopping) _set(x, XferState.failed);
+    } catch (e) {
+      if ((claimed || sayHello) && x.isActive && !x._stopping) _fail(x, 'receiving: $e');
       sock.destroy();
       final left = part;
       if (left != null) File(left).delete().catchError((_) => File(left)).ignore();

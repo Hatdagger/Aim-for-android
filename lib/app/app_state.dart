@@ -722,7 +722,8 @@ class AppState extends ChangeNotifier {
           unawaited(_received(x));
         }
       case XferState.failed:
-        _note(x.peer, 'File transfer failed.');
+        // The reason is shown while Send File is being tested.
+        _note(x.peer, 'File transfer failed.${x.failReason == null ? '' : ' (${x.failReason})'}');
         if (x.outgoing) _dropPickerCopies(x);
       case XferState.declined:
         _note(x.peer, x.outgoing ? '$who declined the file.' : 'You declined the file.');
