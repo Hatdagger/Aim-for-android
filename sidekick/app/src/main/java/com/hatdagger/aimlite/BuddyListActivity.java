@@ -4,6 +4,7 @@ import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.DialogInterface;
 import android.content.Intent;
+import android.content.res.Configuration;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.os.Bundle;
@@ -57,6 +58,7 @@ public final class BuddyListActivity extends Activity {
     private TextView title, banner;
     private Button back;
     private ListView list;
+    private LinearLayout middle, bar;
     private final List<Row> rows = new ArrayList<Row>();
     private final Set<String> collapsed = new HashSet<String>();
     private final Adapter adapter = new Adapter();
@@ -101,10 +103,12 @@ public final class BuddyListActivity extends Activity {
                 return longTap(rows.get(pos));
             }
         });
-        root.addView(list, Ui.grow());
+        middle = new LinearLayout(this);
+        middle.addView(list);
+        root.addView(middle, Ui.grow());
 
-        // AIM's strip of buttons under the list.
-        LinearLayout bar = Ui.row(this);
+        // AIM's strip of buttons: under the list upright, down the right side sideways.
+        bar = Ui.row(this);
         bar.addView(barButton("IM", new View.OnClickListener() {
             public void onClick(View v) {
                 Ui.ask(BuddyListActivity.this, "Send Instant Message", "Screen name", "", new Ui.OnText() {
@@ -129,8 +133,34 @@ public final class BuddyListActivity extends Activity {
                 addDialog("");
             }
         }), Ui.weight(1));
-        root.addView(bar, Ui.fill());
+        middle.addView(bar);
+        arrange(getResources().getConfiguration().orientation);
         setContentView(root);
+    }
+
+    /** Buttons below the list when upright, in a column on the right when sideways. */
+    private void arrange(int orientation) {
+        boolean wide = orientation == Configuration.ORIENTATION_LANDSCAPE;
+        middle.setOrientation(wide ? LinearLayout.HORIZONTAL : LinearLayout.VERTICAL);
+        bar.setOrientation(wide ? LinearLayout.VERTICAL : LinearLayout.HORIZONTAL);
+        list.setLayoutParams(wide
+                ? new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.FILL_PARENT, 1f)
+                : new LinearLayout.LayoutParams(ViewGroup.LayoutParams.FILL_PARENT, 0, 1f));
+        bar.setLayoutParams(wide
+                ? new LinearLayout.LayoutParams(Ui.dp(this, 96), ViewGroup.LayoutParams.FILL_PARENT)
+                : new LinearLayout.LayoutParams(ViewGroup.LayoutParams.FILL_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        for (int i = 0; i < bar.getChildCount(); i++) {
+            bar.getChildAt(i).setLayoutParams(wide
+                    ? new LinearLayout.LayoutParams(ViewGroup.LayoutParams.FILL_PARENT, 0, 1f)
+                    : new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        }
+    }
+
+    /** The keyboard sliding open or shut turns the screen without restarting this window. */
+    @Override
+    public void onConfigurationChanged(Configuration c) {
+        super.onConfigurationChanged(c);
+        arrange(c.orientation);
     }
 
     private Button barButton(String text, View.OnClickListener l) {
