@@ -1,0 +1,55 @@
+// AIM Lite: the AIM client for the T-Mobile Sidekick 4G (Android 2.2, API 8).
+// Plain Java and the platform's own widgets only - no support libraries.
+plugins {
+    id 'com.android.application'
+}
+
+def buildNo = (System.getenv('AIM_BUILD') ?: '1') as int
+def keystore = System.getenv('AIM_KEYSTORE')
+
+android {
+    namespace 'com.hatdagger.aimlite'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId 'com.hatdagger.aimlite'
+        minSdk 8
+        //noinspection ExpiredTargetSdkVersion: this app only runs on a 2010 phone
+        targetSdk 10
+        versionCode buildNo
+        versionName "1.0.${buildNo}"
+    }
+
+    signingConfigs {
+        if (keystore) {
+            release {
+                storeFile file(keystore)
+                storePassword System.getenv('AIM_KEY_PASSWORD')
+                keyAlias 'aim'
+                keyPassword System.getenv('AIM_KEY_PASSWORD')
+                enableV1Signing true // the only kind Android 2.2 understands
+                enableV2Signing true
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            signingConfig keystore ? signingConfigs.release : signingConfigs.debug
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_1_8
+        targetCompatibility JavaVersion.VERSION_1_8
+    }
+
+    lint {
+        // Only one question matters here: does everything exist on Android 2.2?
+        checkOnly 'NewApi'
+        abortOnError true
+        checkReleaseBuilds false
+        textReport true
+    }
+}
