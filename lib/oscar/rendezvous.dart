@@ -18,6 +18,10 @@ const tagAllAddresses = 0x7a01;
 /// connect directly when IPv4 can't.
 const tagAddresses6 = 0x7a02;
 
+/// Our own extra TLV: one piece of a hole-punching description (see
+/// HolePuncher): kind (1 offer, 2 answer), piece number, piece count, data.
+const tagSignal = 0x7a20;
+
 /// One ICBM channel-2 "rendezvous" payload (TLV 0x0005): a proposal to
 /// connect directly, an accept, or a cancel. Only this tiny handshake goes
 /// through the server; the connection itself is device to device.
@@ -136,6 +140,15 @@ class Rendezvous {
     }
     if (six.isNotEmpty) w.tlv(tagAddresses6, six);
     for (final (t, v) in moreTlvs) {
+      w.tlv(t, v);
+    }
+    return w.toBytes();
+  }
+
+  /// A small message carrying [tlvs] (hole-punching signals).
+  static Uint8List encodeSignal(Uint8List cookie, Uint8List cap, List<(int, List<int>)> tlvs) {
+    final w = _head(accept, cookie, cap);
+    for (final (t, v) in tlvs) {
       w.tlv(t, v);
     }
     return w.toBytes();

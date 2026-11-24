@@ -6,10 +6,82 @@ import 'dart:typed_data';
 import 'package:aim_for_android/oscar/bytes.dart';
 import 'package:aim_for_android/oscar/file_transfer.dart';
 import 'package:aim_for_android/oscar/oft.dart';
+import 'package:aim_for_android/oscar/peer_link.dart';
 import 'package:aim_for_android/oscar/peer_path.dart';
 import 'package:aim_for_android/oscar/rendezvous.dart';
 import 'package:aim_for_android/oscar/session.dart';
 import 'package:flutter_test/flutter_test.dart';
+
+/// A network where nobody can reach anybody directly.
+class _Unreachable extends PeerPath {
+  _Unreachable() : super(useUpnp: false);
+  @override
+  Future<(String, List<String>, List<String>, PortLease?)> addresses(int port) async => ('0.0.0.0', <String>[], <String>[], null);
+}
+
+/// One end of an in-memory pipe.
+class _MemLink implements PeerLink {
+  final _in = StreamController<Uint8List>();
+  late _MemLink other;
+  bool _closed = false;
+  @override
+  Stream<Uint8List> get input => _in.stream;
+  @override
+  void add(List<int> data) {
+    if (!_closed && !other._in.isClosed) other._in.add(Uint8List.fromList(data));
+  }
+
+  @override
+  Future<void> flush() async {}
+  @override
+  Future<void> addStream(Stream<List<int>> data) async {
+    await for (final c in data) {
+      add(c);
+      await Future<void>.delayed(Duration.zero);
+    }
+  }
+
+  @override
+  Future<void> close() async => destroy();
+  @override
+  void destroy() {
+    if (_closed) return;
+    _closed = true;
+    if (!_in.isClosed) _in.close();
+    if (!other._in.isClosed) other._in.close();
+  }
+
+  @override
+  String get kind => 'punched';
+}
+
+/// Pretend hole punching: works whenever both sides swap their texts.
+class _FakePuncher implements HolePuncher {
+  static final _waiting = <String, Completer<PeerLink?>>{};
+  static var _n = 0;
+  static var calls = 0;
+
+  @override
+  Future<PunchCall> call() async {
+    calls++;
+    final id = 'offer-${_n++}';
+    final mine = Completer<PeerLink?>();
+    _waiting[id] = mine;
+    return PunchCall(id, (answer) async {
+      expect(answer, 'answer-to-$id');
+      return mine.future;
+    }, () {});
+  }
+
+  @override
+  Future<PunchAnswer> answer(String offer) async {
+    final a = _MemLink(), b = _MemLink();
+    a.other = b;
+    b.other = a;
+    _waiting.remove(offer)!.complete(a);
+    return PunchAnswer('answer-to-$offer', Future.value(b), () {});
+  }
+}
 
 /// Two devices whose "server" just passes handshakes between them.
 class _Pair {
@@ -19,7 +91,7 @@ class _Pair {
   final Directory bobDir;
   final sent = <(String, Rendezvous)>[];
 
-  _Pair(this.aliceDir, this.bobDir) {
+  _Pair(this.aliceDir, this.bobDir, {bool blocked = false, bool punch = false}) {
     Future<SendResult> relay(String from, FileTransfers to, Uint8List data) async {
       final r = Rendezvous.parse(data);
       sent.add((from, r));
@@ -30,13 +102,15 @@ class _Pair {
     alice = FileTransfers(
       sendRdv: (to, cookie, data) => relay('Alice', bob, data),
       receiveDir: () async => aliceDir.path,
-      path: PeerPath(useUpnp: false),
+      path: blocked ? _Unreachable() : PeerPath(useUpnp: false),
+      puncher: punch ? _FakePuncher() : null,
       reverseTimeout: const Duration(seconds: 15),
     );
     bob = FileTransfers(
       sendRdv: (to, cookie, data) => relay('Bob', alice, data),
       receiveDir: () async => bobDir.path,
-      path: PeerPath(useUpnp: false),
+      path: blocked ? _Unreachable() : PeerPath(useUpnp: false),
+      puncher: punch ? _FakePuncher() : null,
       reverseTimeout: const Duration(seconds: 15),
     );
   }
@@ -253,5 +327,42 @@ void main() {
       expect(pair.bobDir.listSync().where((e) => e.path.endsWith('.part')), isEmpty);
       expect(hex(out.cookie), out.id);
     });
+  });
+
+  test('no direct path: hole punching takes over and the files still arrive', () async {
+    final root = await Directory.systemTemp.createTemp('aim_punch');
+    final pair = _Pair(await Directory('${root.path}/a').create(), await Directory('${root.path}/b').create(),
+        blocked: true, punch: true);
+    final data = _random(2 * 1024 * 1024 + 3, 9);
+    final f = File('${root.path}/song.mp3')..writeAsBytesSync(data);
+    final offered = _until(pair.bob, (x) => x.state == XferState.offered);
+    final out = await pair.alice.offer('Bob', [(f.path, 'song.mp3')]);
+    final inc = await offered;
+    final aDone = _until(pair.alice, (x) => x.id == out.id && !x.isActive);
+    final bDone = _until(pair.bob, (x) => x.id == inc.id && !x.isActive);
+    await pair.bob.accept(inc.id);
+    expect((await aDone).state, XferState.done, reason: out.failReason);
+    expect((await bDone).state, XferState.done, reason: inc.failReason);
+    expect(out.via, 'punched');
+    expect(await File(inc.files.single.path!).readAsBytes(), data);
+    // The offer and answer went through the "server" as small pieces.
+    expect(pair.sent.where((s) => s.$2.tlvs[tagSignal] != null).length, greaterThanOrEqualTo(2));
+    await pair.dispose();
+    await root.delete(recursive: true);
+  });
+
+  test('no direct path and no hole punching: it just fails', () async {
+    final root = await Directory.systemTemp.createTemp('aim_nopunch');
+    final pair = _Pair(await Directory('${root.path}/a').create(), await Directory('${root.path}/b').create(),
+        blocked: true);
+    final f = File('${root.path}/x.txt')..writeAsStringSync('hi');
+    final offered = _until(pair.bob, (x) => x.state == XferState.offered);
+    final out = await pair.alice.offer('Bob', [(f.path, 'x.txt')]);
+    final inc = await offered;
+    final aDone = _until(pair.alice, (x) => x.id == out.id && !x.isActive);
+    await pair.bob.accept(inc.id);
+    expect((await aDone).state, XferState.failed);
+    await pair.dispose();
+    await root.delete(recursive: true);
   });
 }

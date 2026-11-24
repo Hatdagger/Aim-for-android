@@ -1,10 +1,12 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 import 'dart:typed_data';
 
 import 'bytes.dart';
 import 'oft.dart';
+import 'peer_link.dart';
 import 'peer_path.dart';
 import 'rendezvous.dart';
 import 'session.dart';
@@ -62,7 +64,16 @@ class FileXfer {
   PortLease? _lease;
   Timer? _timer;
   Timer? _watchdog;
-  Socket? _sock;
+  PeerLink? _sock;
+
+  // hole punching
+  final Map<int, List<int>> _sigParts = {};
+  int _sigKind = 0;
+  PunchCall? _call;
+  void Function()? _punchCancel;
+
+  /// How the files went: "TCP" or "punched" (for troubleshooting).
+  String? via;
   String? _partial;
   DateTime _lastMoved = DateTime.now();
   DateTime _lastEmit = DateTime.fromMillisecondsSinceEpoch(0);
@@ -108,6 +119,13 @@ class FileTransfers {
 
   final PeerPath path;
 
+  /// Hole punching, for when neither device can reach the other directly.
+  /// Optional (tests and platforms without it just fail as before).
+  HolePuncher? puncher;
+
+  /// How long hole punching may take to find a path.
+  Duration punchTimeout;
+
   /// When false, offers are declined without asking.
   bool allowIncoming = true;
 
@@ -128,6 +146,8 @@ class FileTransfers {
     this.inviteTimeout = const Duration(minutes: 2),
     this.reverseTimeout = const Duration(seconds: 40),
     this.stallTimeout = const Duration(seconds: 45),
+    this.puncher,
+    this.punchTimeout = const Duration(seconds: 45),
   }) : path = path ?? PeerPath();
 
   final Map<String, FileXfer> xfers = {};
@@ -165,11 +185,16 @@ class FileTransfers {
       x._sock = null;
       if (s != null) {
         if (x.state == XferState.done) {
-          s.close().catchError((_) => s).whenComplete(s.destroy);
+          unawaited(s.close());
         } else {
           s.destroy();
         }
       }
+      if (x.state != XferState.done || s == null) {
+        x._punchCancel?.call();
+      }
+      x._punchCancel = null;
+      x._call = null;
       final part = x._partial;
       x._partial = null;
       if (part != null) File(part).delete().catchError((_) => File(part));
@@ -276,7 +301,7 @@ class FileTransfers {
     }
     if (sock != null) {
       _rdv(x, Rendezvous.encodeAccept(x.cookie, cap: capSendFile)).ignore();
-      unawaited(_receive(x, sock, sayHello: true));
+      unawaited(_receive(x, SocketLink(sock), sayHello: true));
       return;
     }
     // Couldn't reach them: listen, and ask them to connect to us instead.
@@ -348,6 +373,11 @@ class FileTransfers {
   void onRendezvous(String from, Rendezvous r) {
     final x = xfers[hex(r.cookie)];
     final mine = x != null && normalizeSn(x.peer) == normalizeSn(from) ? x : null;
+    final sig = r.tlvs[tagSignal];
+    if (sig != null) {
+      if (mine != null) unawaited(_onSignal(mine, sig.value));
+      return;
+    }
     switch (r.type) {
       case Rendezvous.propose:
         if (mine != null) {
@@ -402,11 +432,150 @@ class FileTransfers {
       return;
     }
     if (sock == null) {
+      final why = 'could not reach buddy either way; tried ${tried.join(', ')} port ${r.port}; we offered ${x._ours}';
+      if (puncher != null) {
+        unawaited(_punchCall(x, why));
+        return;
+      }
       _cancelRdv(x, Rendezvous.reasonUnknown);
-      _fail(x, 'could not reach buddy either way; tried ${tried.join(', ')} port ${r.port}; we offered ${x._ours}');
+      _fail(x, why);
       return;
     }
-    unawaited(_send(x, sock, needHello: false));
+    unawaited(_send(x, SocketLink(sock), needHello: false));
+  }
+
+  // ---------------------------------------------------------------- hole punching
+
+  static const _sigOffer = 1;
+  static const _sigAnswer = 2;
+  static const _sigPiece = 700;
+
+  Future<void> _sendSignal(FileXfer x, int kind, String text) async {
+    final data = zlib.encode(utf8.encode(text));
+    final total = (data.length + _sigPiece - 1) ~/ _sigPiece;
+    for (var i = 0; i < total; i++) {
+      final piece = data.sublist(i * _sigPiece, min(data.length, (i + 1) * _sigPiece));
+      final ok = await _rdv(
+          x, Rendezvous.encodeSignal(x.cookie, capSendFile, [(tagSignal, [kind, i, total, ...piece])]));
+      if (!ok) throw const SocketException('signal not delivered');
+    }
+  }
+
+  /// A piece of the buddy's offer or answer arrived. Returns the whole text
+  /// once every piece is in.
+  String? _collectSignal(FileXfer x, List<int> v) {
+    if (v.length < 3) return null;
+    final kind = v[0], i = v[1], total = v[2];
+    if (total == 0 || i >= total) return null;
+    if (x._sigKind != kind) {
+      x._sigKind = kind;
+      x._sigParts.clear();
+    }
+    x._sigParts[i] = v.sublist(3);
+    if (x._sigParts.length < total) return null;
+    final all = [for (var k = 0; k < total; k++) ...?x._sigParts[k]];
+    x._sigParts.clear();
+    try {
+      return utf8.decode(zlib.decode(all));
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// The sender couldn't reach the buddy and the buddy couldn't reach us:
+  /// try hole punching. We dial; the buddy answers.
+  Future<void> _punchCall(FileXfer x, String whyDirectFailed) async {
+    final p = puncher!;
+    x._timer?.cancel();
+    x._timer = Timer(punchTimeout, () {
+      if (x.isPending) {
+        _cancelRdv(x, Rendezvous.reasonUnknown);
+        _fail(x, 'hole punching found no path; before that: $whyDirectFailed');
+      }
+    });
+    try {
+      final call = await p.call();
+      if (!x.isPending) {
+        call.cancel();
+        return;
+      }
+      x._call = call;
+      x._punchCancel = call.cancel;
+      await _sendSignal(x, _sigOffer, call.offer);
+    } catch (e) {
+      if (x.isPending) {
+        _cancelRdv(x, Rendezvous.reasonUnknown);
+        _fail(x, 'hole punching could not start ($e); before that: $whyDirectFailed');
+      }
+    }
+  }
+
+  Future<void> _onSignal(FileXfer x, List<int> v) async {
+    if (x.state != XferState.connecting) return;
+    final text = _collectSignal(x, v);
+    if (text == null) return;
+    final p = puncher;
+    if (x._sigKind == _sigOffer && !x.outgoing) {
+      if (p == null) {
+        _cancelRdv(x, Rendezvous.reasonUnknown);
+        _fail(x, 'buddy wanted hole punching; not available here');
+        return;
+      }
+      // We're the receiver: stop waiting for a direct connection and answer.
+      x._timer?.cancel();
+      x._timer = Timer(punchTimeout, () {
+        if (x.isPending) {
+          _cancelRdv(x, Rendezvous.reasonUnknown);
+          _fail(x, 'hole punching found no path; we offered ${x._ours}');
+        }
+      });
+      try {
+        final a = await p.answer(text);
+        if (!x.isPending) {
+          a.cancel();
+          return;
+        }
+        x._punchCancel = a.cancel;
+        await _sendSignal(x, _sigAnswer, a.answer);
+        final link = await a.link;
+        if (!x.isPending || x._sock != null) {
+          link?.destroy();
+          return;
+        }
+        if (link == null) {
+          _cancelRdv(x, Rendezvous.reasonUnknown);
+          _fail(x, 'hole punching found no path; we offered ${x._ours}');
+          return;
+        }
+        unawaited(_receive(x, link, sayHello: false));
+      } catch (e) {
+        if (x.isPending) {
+          _cancelRdv(x, Rendezvous.reasonUnknown);
+          _fail(x, 'hole punching failed: $e');
+        }
+      }
+    } else if (x._sigKind == _sigAnswer && x.outgoing) {
+      final call = x._call;
+      if (call == null) return;
+      try {
+        final link = await call.connect(text);
+        if (!x.isPending || x._sock != null) {
+          link?.destroy();
+          return;
+        }
+        if (link == null) {
+          _cancelRdv(x, Rendezvous.reasonUnknown);
+          _fail(x, 'hole punching found no path; we offered ${x._ours}');
+          return;
+        }
+        unawaited(_send(x, link, needHello: false));
+      } catch (e) {
+        if (x.isPending) {
+          _cancelRdv(x, Rendezvous.reasonUnknown);
+          _fail(x, 'hole punching failed: $e');
+        }
+      }
+    }
   }
 
   // ---------------------------------------------------------------- connections
@@ -422,9 +591,9 @@ class FileTransfers {
       // The sender waits for the buddy's hello; the receiver checks the
       // cookie on the first file offer instead.
       if (sender) {
-        unawaited(_send(x, sock, needHello: true));
+        unawaited(_send(x, SocketLink(sock), needHello: true));
       } else {
-        unawaited(_receive(x, sock, sayHello: false));
+        unawaited(_receive(x, SocketLink(sock), sayHello: false));
       }
     }
 
@@ -447,11 +616,10 @@ class FileTransfers {
 
   /// Our side sends. [needHello]: the buddy connected to us, so it must show
   /// the cookie first; until then a stray connection gets nothing.
-  Future<void> _send(FileXfer x, Socket sock, {required bool needHello}) async {
-    final rd = _Reader(sock);
+  Future<void> _send(FileXfer x, PeerLink sock, {required bool needHello}) async {
+    final rd = _Reader(sock.input);
     var claimed = false;
     try {
-      _tune(sock);
       if (needHello) {
         final h = await rd.header().timeout(const Duration(seconds: 10));
         if (h.type != helloType || !_same(h.cookie, x.cookie)) throw const FormatException('wrong hello');
@@ -462,6 +630,7 @@ class FileTransfers {
         return;
       }
       x._sock = sock;
+      x.via = sock.kind;
       claimed = true;
       _set(x, XferState.moving);
       _startWatchdog(x);
@@ -504,12 +673,11 @@ class FileTransfers {
   }
 
   /// Our side receives. [sayHello]: we connected to them, so we show the cookie.
-  Future<void> _receive(FileXfer x, Socket sock, {required bool sayHello}) async {
-    final rd = _Reader(sock);
+  Future<void> _receive(FileXfer x, PeerLink sock, {required bool sayHello}) async {
+    final rd = _Reader(sock.input);
     var claimed = false;
     String? part;
     try {
-      _tune(sock);
       if (sayHello) {
         sock.add(OftHeader(type: helloType, cookie: x.cookie).encode());
         await sock.flush();
@@ -524,6 +692,7 @@ class FileTransfers {
             return;
           }
           x._sock = sock;
+          x.via = sock.kind;
           claimed = true;
           if (p.totalSize > x.totalSize) x.totalSize = p.totalSize;
           _set(x, XferState.moving);
@@ -577,12 +746,6 @@ class FileTransfers {
     }
   }
 
-  static void _tune(Socket s) {
-    try {
-      s.setOption(SocketOption.tcpNoDelay, true);
-    } catch (_) {}
-  }
-
   /// "name.ext", or "name (2).ext" if that's taken.
   static Future<String> _freeName(String dir, String name) async {
     final sep = Platform.pathSeparator;
@@ -618,7 +781,7 @@ class _Reader {
   Uint8List _buf = Uint8List(0);
   int _off = 0;
 
-  _Reader(Socket s) : _it = StreamIterator<Uint8List>(s);
+  _Reader(Stream<Uint8List> s) : _it = StreamIterator<Uint8List>(s);
 
   Future<bool> _fill() async {
     if (_off < _buf.length) return true;

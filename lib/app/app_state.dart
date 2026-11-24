@@ -23,6 +23,7 @@ import 'input_mode.dart';
 import 'platform_bridge.dart';
 import 'settings.dart';
 import 'sounds.dart';
+import 'webrtc_punch.dart';
 
 class Conversation {
   final String key;
@@ -184,6 +185,7 @@ class AppState extends ChangeNotifier {
     );
     c.direct.allowIncoming = settings.allowDirectConnect;
     c.files.allowIncoming = settings.allowDirectConnect;
+    c.files.puncher = WebRtcPuncher();
     client = c;
     _iconUploaded = false;
     conversations.clear();
