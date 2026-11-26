@@ -23,6 +23,9 @@ An old-school AIM client with modern behaviour, for servers running
 - Send File: pick any files with the system file picker; they go straight to your buddy's
   device (same Wi-Fi first, then IPv6, then the router's public address), never through
   the server. Received files land in Download/AIM. Transfers keep going in the background.
+- Home screen mode (Android, Prefs > Home Screen): turns a cheap phone into an AIM-only phone.
+  The Home key and turning the phone on open AIM; leaving it or opening Android's settings needs
+  a PIN you choose. Wi-Fi can still be joined from inside AIM.
 - Invite links: "Get a Screen Name" with an invite from a friend.
 - Optional chat history (off by default, cleared when you sign off).
 

@@ -273,6 +273,15 @@ class AppSettings extends ChangeNotifier {
   bool get askedBackground => _p.getBool('askedBg') ?? false;
   set askedBackground(bool v) => _set('askedBg', v);
 
+  // ------------------------------------------------------------ home screen mode
+  /// AIM is the phone's home screen (Android). Leaving needs [homePinHash].
+  bool get homeMode => _p.getBool('homeMode') ?? false;
+  set homeMode(bool v) => _set('homeMode', v);
+
+  /// 'salt:sha256hex' of the PIN chosen when home screen mode was turned on.
+  String get homePinHash => _p.getString('homePin') ?? '';
+  set homePinHash(String v) => v.isEmpty ? _remove('homePin') : _set('homePin', v);
+
   // ------------------------------------------------------------ look
   /// Your message colours (ARGB), sent to buddies like AIM did. null = default.
   int? get myTextColor => _p.getInt('myFg');

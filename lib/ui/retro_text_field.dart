@@ -33,6 +33,9 @@ class RetroTextField extends StatelessWidget {
   /// Screen name of the chat this box types into (it may have its own keyboard).
   final String? oskChat;
 
+  /// Numbers only (PINs): the system keyboard opens as a number pad.
+  final bool digits;
+
   const RetroTextField({
     super.key,
     required this.controller,
@@ -50,6 +53,7 @@ class RetroTextField extends StatelessWidget {
     this.oskPreview,
     this.oskPreviewListen,
     this.oskChat,
+    this.digits = false,
   });
 
   @override
@@ -108,7 +112,7 @@ class RetroTextField extends StatelessWidget {
       onChanged: onChanged,
       onSubmitted: onSubmitted,
       onTap: () => context.read<InputMode>().noteTouchOrKeyboard(),
-      keyboardType: maxLines > 1 ? TextInputType.multiline : TextInputType.text,
+      keyboardType: digits ? TextInputType.number : (maxLines > 1 ? TextInputType.multiline : TextInputType.text),
       textInputAction: action ?? (maxLines > 1 && !enterSubmits ? TextInputAction.newline : TextInputAction.done),
       style: const TextStyle(fontSize: 15, color: Colors.black),
       cursorColor: Colors.black,

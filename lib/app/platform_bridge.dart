@@ -161,6 +161,60 @@ class PlatformBridge {
     } catch (_) {}
   }
 
+  // ------------------------------------------------------------ home screen mode
+
+  /// Lets Android offer AIM as a home screen (on) or stops it (off).
+  static Future<void> setHomeScreenAllowed(bool on) async {
+    if (!_android) return;
+    try {
+      await _ch.invokeMethod('setHomeAllowed', {'on': on});
+    } catch (_) {}
+  }
+
+  /// True when pressing Home opens AIM.
+  static Future<bool> isDefaultHome() async {
+    if (!_android) return false;
+    try {
+      return await _ch.invokeMethod<bool>('isDefaultHome') ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Asks Android to use AIM as the home screen (a prompt, or the Home app
+  /// settings page on phones without one).
+  static Future<void> chooseHome() async {
+    if (!_android) return;
+    try {
+      await _ch.invokeMethod('chooseHome');
+    } catch (_) {}
+  }
+
+  /// Goes to the home screen (used after leaving home screen mode, so the
+  /// phone's usual launcher comes back).
+  static Future<void> goHome() async {
+    if (!_android) return;
+    try {
+      await _ch.invokeMethod('goHome');
+    } catch (_) {}
+  }
+
+  /// A Wi-Fi picker that doesn't open the rest of Android's settings where
+  /// the phone allows it (Android 10+); the Wi-Fi settings page otherwise.
+  static Future<void> openWifi() async {
+    if (!_android) return;
+    try {
+      await _ch.invokeMethod('openWifi');
+    } catch (_) {}
+  }
+
+  static Future<void> openSystemSettings() async {
+    if (!_android) return;
+    try {
+      await _ch.invokeMethod('openSystemSettings');
+    } catch (_) {}
+  }
+
   /// Opens the system prompt to exempt the app from battery optimisation so
   /// the connection survives with the screen off.
   static Future<void> requestBackgroundRunning() async {

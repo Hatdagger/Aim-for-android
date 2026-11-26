@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../app/app_state.dart';
+import '../app/platform_bridge.dart';
 import '../oscar/client.dart';
 import 'retro.dart';
 import 'retro_text_field.dart';
@@ -155,6 +156,11 @@ class _SignOnScreenState extends State<SignOnScreen> {
                     ),
                     const SizedBox(width: 6),
                     const UpdateButton(),
+                    // AIM-only phones: join a network without leaving AIM.
+                    if (app.settings.homeMode) ...[
+                      const SizedBox(width: 6),
+                      RetroButton(minWidth: 0, onPressed: PlatformBridge.openWifi, child: const Icon(Icons.wifi)),
+                    ],
                     const Spacer(),
                     if (connecting)
                       RetroButton(onPressed: () => app.signOff(), child: const Text('Cancel'))

@@ -4,6 +4,8 @@ import android.Manifest
 import android.annotation.SuppressLint
 import android.app.NotificationManager
 import android.app.PendingIntent
+import android.app.role.RoleManager
+import android.content.ComponentName
 import android.content.pm.PackageInstaller
 import android.content.ContentValues
 import android.content.Context
@@ -136,6 +138,30 @@ class MainActivity : FlutterActivity() {
                     }
                     "installApk" -> {
                         installApk(call.argument<String>("path") ?: "")
+                        result.success(null)
+                    }
+                    "setHomeAllowed" -> {
+                        setHomeAllowed(call.argument<Boolean>("on") ?: false)
+                        result.success(null)
+                    }
+                    "isDefaultHome" -> result.success(isDefaultHome())
+                    "chooseHome" -> {
+                        chooseHome()
+                        result.success(null)
+                    }
+                    "goHome" -> {
+                        startActivity(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME)
+                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                        result.success(null)
+                    }
+                    "openWifi" -> {
+                        val panel = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) Settings.Panel.ACTION_WIFI
+                            else Settings.ACTION_WIFI_SETTINGS
+                        if (!tryStart(Intent(panel))) tryStart(Intent(Settings.ACTION_WIFI_SETTINGS))
+                        result.success(null)
+                    }
+                    "openSystemSettings" -> {
+                        tryStart(Intent(Settings.ACTION_SETTINGS))
                         result.success(null)
                     }
                     "requestIgnoreBatteryOptimizations" -> {
@@ -354,6 +380,52 @@ class MainActivity : FlutterActivity() {
         } catch (e: Exception) {
             false
         }
+    }
+
+    // ------------------------------------------------------------ home screen mode
+
+    /**
+     * AIM is offered as a home screen through an activity alias that is off
+     * until home screen mode is turned on, so it never shows up in Android's
+     * "pick a Home app" list otherwise.
+     */
+    private val homeAlias get() = ComponentName(this, "__PACKAGE__.HomeScreen")
+
+    private fun setHomeAllowed(on: Boolean) {
+        val want = if (on) PackageManager.COMPONENT_ENABLED_STATE_ENABLED else PackageManager.COMPONENT_ENABLED_STATE_DISABLED
+        if (packageManager.getComponentEnabledSetting(homeAlias) == want) return
+        packageManager.setComponentEnabledSetting(homeAlias, want, PackageManager.DONT_KILL_APP)
+    }
+
+    private fun isDefaultHome(): Boolean {
+        val home = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME)
+        val r = packageManager.resolveActivity(home, PackageManager.MATCH_DEFAULT_ONLY) ?: return false
+        return r.activityInfo?.packageName == packageName
+    }
+
+    private fun chooseHome() {
+        if (isDefaultHome()) return
+        // Android 10+: a small "Set AIM as your default Home app?" prompt.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val roles = getSystemService(RoleManager::class.java)
+            if (roles != null && roles.isRoleAvailable(RoleManager.ROLE_HOME) && !roles.isRoleHeld(RoleManager.ROLE_HOME)) {
+                try {
+                    @Suppress("DEPRECATION")
+                    startActivityForResult(roles.createRequestRoleIntent(RoleManager.ROLE_HOME), 77)
+                    return
+                } catch (_: Exception) {}
+            }
+        }
+        // Older phones: the Home app settings page, or else Android's "Open with" list.
+        if (tryStart(Intent(Settings.ACTION_HOME_SETTINGS))) return
+        tryStart(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME))
+    }
+
+    private fun tryStart(i: Intent): Boolean = try {
+        startActivity(i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        true
+    } catch (_: Exception) {
+        false
     }
 
     @SuppressLint("BatteryLife")

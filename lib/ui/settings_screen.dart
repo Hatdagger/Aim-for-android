@@ -10,6 +10,7 @@ import 'retro.dart';
 import 'retro_text_field.dart';
 import 'setup_wizard.dart';
 import 'chat.dart';
+import 'home_screen_mode.dart';
 import 'phone_art.dart';
 import 'phone_theme.dart';
 import 't9_phone.dart';
@@ -263,6 +264,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     label: 'Use this address even if the server hands out 127.0.0.1',
                     onChanged: (v) => s.fixLoopbackRedirects = v),
               ]),
+              if (Platform.isAndroid) _section('Home Screen', const [HomeScreenSection()]),
               if (Platform.isAndroid)
                 _section('Android', [
                   const Text('Notifications only say how many new messages you have. They never show who sent them or what they say.'),

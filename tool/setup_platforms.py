@@ -78,6 +78,25 @@ def patch_android():
             '            </intent-filter>\n'
         )
         man = man.replace('        </activity>', link_filter + '        </activity>', 1)
+    # Home screen mode: one AIM window whether it was opened from the app icon
+    # or the Home key, and a Home entry that stays off until turned on in Prefs.
+    man = re.sub(r'android:launchMode="singleTop"', 'android:launchMode="singleTask"', man, count=1)
+    if 'android:launchMode=' not in man:
+        man = man.replace('android:name=".MainActivity"', 'android:name=".MainActivity"\n            android:launchMode="singleTask"', 1)
+    if '.HomeScreen"' not in man:
+        alias = (
+            f'        <activity-alias android:name="{pkg}.HomeScreen"\n'
+            '            android:targetActivity=".MainActivity"\n'
+            '            android:enabled="false"\n'
+            '            android:exported="true">\n'
+            '            <intent-filter>\n'
+            '                <action android:name="android.intent.action.MAIN"/>\n'
+            '                <category android:name="android.intent.category.HOME"/>\n'
+            '                <category android:name="android.intent.category.DEFAULT"/>\n'
+            '            </intent-filter>\n'
+            '        </activity-alias>\n'
+        )
+        man = man.replace('    </application>', alias + '    </application>', 1)
     write(man_p, man)
     patch_signing()
     print('android: patched', pkg)

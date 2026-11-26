@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 import 'app/app_state.dart';
 import 'app/input_mode.dart';
 import 'app/numpad_t9.dart';
+import 'app/platform_bridge.dart';
 import 'app/settings.dart';
 import 'app/updater.dart';
 import 'oscar/client.dart';
@@ -19,6 +20,8 @@ Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   final settings = AppSettings();
   await settings.load();
+  // Keep Android's Home entry in step with the setting (e.g. after restoring a backup).
+  PlatformBridge.setHomeScreenAllowed(settings.homeMode);
   final input = InputMode(settings);
   final app = AppState(settings, input);
   final updates = UpdateChecker(settings)..start();
@@ -102,7 +105,9 @@ class _AimAppState extends State<AimApp> {
         },
         child: OskHost(child: child ?? const SizedBox.shrink()),
       ),
-      home: home,
+      // As the phone's home screen there's nothing behind AIM: Back stops at
+      // the first screen instead of closing the app.
+      home: PopScope(canPop: !settings.homeMode, child: home),
     );
   }
 }
