@@ -1049,10 +1049,31 @@ class OscarSession {
   }
 
   /// Finds the Buddy Chat room called [name], making it if nobody has.
+  ///
+  /// The room-finding link can die quietly while the phone sleeps or changes
+  /// network. If it doesn't answer quickly, it's dropped and the request is
+  /// tried once more on a fresh link.
   Future<RoomInfo> findOrCreateRoom(String name, {int exchange = privateExchange}) async {
+    try {
+      return await _findOrCreateRoomOnce(name, exchange, const Duration(seconds: 8));
+    } on OscarTimeout {
+      _dropNav();
+    } on ConnectionClosed {
+      _dropNav();
+    }
+    return _findOrCreateRoomOnce(name, exchange, const Duration(seconds: 20));
+  }
+
+  void _dropNav() {
+    final n = _nav;
+    _nav = null;
+    n?.debugKill();
+  }
+
+  Future<RoomInfo> _findOrCreateRoomOnce(String name, int exchange, Duration timeout) async {
     final c = await _navConn();
     final id = c.nextReqId();
-    final f = c.expect(const [(0x000d, 0x0009), (0x000d, 0x0001)], reqId: id);
+    final f = c.expect(const [(0x000d, 0x0009), (0x000d, 0x0001)], reqId: id, timeout: timeout);
     final w = ByteWriter()
       ..u16(exchange)
       ..str8('create')

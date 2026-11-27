@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -5,6 +7,7 @@ import '../app/app_state.dart';
 import '../oscar/aim_html.dart';
 import '../oscar/bytes.dart';
 import '../oscar/client.dart';
+import '../oscar/flap.dart' show ConnectionClosed, OscarTimeout;
 import '../oscar/models.dart';
 import '../oscar/chat_room.dart';
 import 'profile_screen.dart';
@@ -468,8 +471,23 @@ class _BuddyListPaneState extends State<BuddyListPane> {
       ]);
     });
     if (go != true || !mounted) return;
+    final roomName = name.text.trim();
+    // Show that something is happening while the room opens (it can take a
+    // few seconds on a slow link), with a way out.
+    final job = app.joinRoom(roomName);
+    final result = await showRetroDialog<Object>(context,
+        title: 'Chat Room', builder: (ctx) => _RoomWaiting(job: job, name: roomName));
+    if (result is! String) {
+      if (result == null) {
+        // Cancelled: if the room opens after all, leave it again.
+        job.then((k) => app.leaveRoom(k), onError: (Object _) {});
+      } else if (mounted) {
+        showRetroMessage(context, 'Chat', _roomError(result));
+      }
+      return;
+    }
     await _try('Chat', () async {
-      final key = await app.joinRoom(name.text);
+      final key = result;
       if (!mounted) return;
       widget.onOpenRoom(key);
       final room = app.rooms[key];
@@ -478,6 +496,13 @@ class _BuddyListPaneState extends State<BuddyListPane> {
         await showRoomInviteDialog(context, room);
       }
     });
+  }
+
+  static String _roomError(Object e) {
+    if (e is OscarTimeout || e is ConnectionClosed || e is SocketException) {
+      return 'The server didn\'t answer. Check that you\'re online and try again.';
+    }
+    return '$e'.replaceFirst('Exception: ', '');
   }
 
   String _idle(int m) => m < 60 ? '(${m}m)' : '(${m ~/ 60}h)';
@@ -812,5 +837,35 @@ class Pictogram extends StatelessWidget {
         ]),
       ),
     );
+  }
+}
+
+/// "Opening room…" with Cancel; closes itself with the room key, or the error.
+class _RoomWaiting extends StatefulWidget {
+  final Future<String> job;
+  final String name;
+  const _RoomWaiting({required this.job, required this.name});
+
+  @override
+  State<_RoomWaiting> createState() => _RoomWaitingState();
+}
+
+class _RoomWaitingState extends State<_RoomWaiting> {
+  @override
+  void initState() {
+    super.initState();
+    widget.job.then((key) {
+      if (mounted) Navigator.pop(context, key);
+    }, onError: (Object e) {
+      if (mounted) Navigator.pop(context, e);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, mainAxisSize: MainAxisSize.min, children: [
+      Padding(padding: const EdgeInsets.all(8), child: Text('Opening "${widget.name}"…')),
+      RetroButton(autofocus: true, onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+    ]);
   }
 }
